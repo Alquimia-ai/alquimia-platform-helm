@@ -8,6 +8,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- .Values.namespace | default .Release.Namespace -}}
 {{- end }}
 
+{{- define "alquimia.vaultUnsealer.serviceAccountName" -}}
+{{- $sa := .Values.vault.serviceAccount | default dict -}}
+{{- $sa.name | default "vault-unsealer" -}}
+{{- end }}
+
 {{- define "alquimia.helmSecrets" -}}
 {{- if eq (.Values.secrets.backend | default "sealed") "helm" }}true{{- else }}false{{- end }}
 {{- end }}

@@ -39,6 +39,8 @@ Pull secret: `chart/secrets/local/alquimia-dockerhub-pull/.dockerconfigjson`.
 
 No hace falta crear `alquimia-vault` ni `vault-keys`: los escribe el unsealer en el cluster.
 
+Si Argo **no puede crear ServiceAccounts**, poner `vault.serviceAccount.create: false` y aplicar el SA (y si hace falta Role + RoleBinding) de [docs/vault-unsealer-rbac.md](docs/vault-unsealer-rbac.md) por consola. El Deployment referencia el SA existente.
+
 ## 3. Sellar con la llave del cluster
 
 Ajustar namespace/nombre del controller si en el cluster no es este:

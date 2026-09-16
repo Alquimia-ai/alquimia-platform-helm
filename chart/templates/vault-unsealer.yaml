@@ -1,8 +1,14 @@
 {{- if and .Values.vault.enabled .Values.vault.autoUnseal }}
+{{- $saName := include "alquimia.vaultUnsealer.serviceAccountName" . }}
+{{- $createSA := true }}
+{{- if and .Values.vault.serviceAccount (hasKey .Values.vault.serviceAccount "create") }}
+{{- $createSA = .Values.vault.serviceAccount.create }}
+{{- end }}
+{{- if $createSA }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: vault-unsealer
+  name: {{ $saName }}
   namespace: {{ include "alquimia.namespace" . }}
   labels:
     app: vault-unsealer
@@ -10,6 +16,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
 ---
+{{- end }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -47,7 +54,7 @@ roleRef:
   name: vault-unsealer
 subjects:
   - kind: ServiceAccount
-    name: vault-unsealer
+    name: {{ $saName }}
     namespace: {{ include "alquimia.namespace" . }}
 ---
 apiVersion: v1
@@ -85,7 +92,7 @@ spec:
         app: vault-unsealer
     spec:
       {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.vault.nodeAffinity) | nindent 6 }}
-      serviceAccountName: vault-unsealer
+      serviceAccountName: {{ $saName }}
       restartPolicy: Always
       securityContext: {}
       containers:

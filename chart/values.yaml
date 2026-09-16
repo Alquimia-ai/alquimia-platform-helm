@@ -90,6 +90,11 @@ vault:
   keyShares: 1
   keyThreshold: 1
   keysSecret: vault-keys
+  # false: no crea el SA (p. ej. Argo no puede). Crear por consola
+  # (docs/vault-unsealer-rbac.md) y referenciarlo con name.
+  serviceAccount:
+    create: true
+    name: vault-unsealer
 
 runtime:
   enabled: true
