@@ -90,4 +90,6 @@ Argo sincroniza solo. No hace falta `helm upgrade` en el cluster.
 | Runtime | ConfigMap, master, workers (SA `default` + pull secret en el pod) |
 | Studio | Deployment, Service, Route |
 
+Tabla de recursos y consumo: [docs/recursos.md](docs/recursos.md).
+
 `nodeAffinity` es opcional en `values.yaml`.
