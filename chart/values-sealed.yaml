@@ -1,0 +1,4 @@
+# Generado por ./chart/scripts/seal-secrets.sh
+# Cada cluster debe sellar con SU certificado de Sealed Secrets y SU namespace.
+# No reutilizar blobs de otro entorno.
+sealedSecrets: {}

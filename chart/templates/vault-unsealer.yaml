@@ -1,0 +1,130 @@
+{{- if and .Values.vault.enabled .Values.vault.autoUnseal }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-unsealer
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: vault-unsealer
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vault-unsealer
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: vault-unsealer
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ .Values.vault.keysSecret }}
+      - alquimia-vault
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vault-unsealer
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: vault-unsealer
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vault-unsealer
+subjects:
+  - kind: ServiceAccount
+    name: vault-unsealer
+    namespace: {{ include "alquimia.namespace" . }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-unsealer
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: vault-unsealer
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  unseal.sh: |
+{{ .Files.Get "scripts/vault-unseal.sh" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-unsealer
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: vault-unsealer
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-unsealer
+  template:
+    metadata:
+      labels:
+        app: vault-unsealer
+    spec:
+      {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.vault.nodeAffinity) | nindent 6 }}
+      serviceAccountName: vault-unsealer
+      restartPolicy: Always
+      securityContext: {}
+      containers:
+        - name: unsealer
+          image: {{ .Values.images.curl | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - /scripts/unseal.sh
+          env:
+            - name: VAULT_ADDR
+              value: {{ printf "http://vault.%s.svc.cluster.local:8200" (include "alquimia.namespace" .) | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KEYS_SECRET
+              value: {{ .Values.vault.keysSecret | quote }}
+            - name: TOKEN_SECRET
+              value: alquimia-vault
+            - name: KEY_SHARES
+              value: {{ .Values.vault.keyShares | quote }}
+            - name: KEY_THRESHOLD
+              value: {{ .Values.vault.keyThreshold | quote }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+          securityContext: {}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+      volumes:
+        - name: scripts
+          configMap:
+            name: vault-unsealer
+            defaultMode: 0755
+{{- end }}

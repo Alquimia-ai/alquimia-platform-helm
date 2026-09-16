@@ -1,0 +1,40 @@
+# destination.namespace debe coincidir con chart/values.yaml (namespace).
+# metadata.namespace: argocd u openshift-gitops, según el cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alquimia
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: CHANGE_ME.git
+    targetRevision: HEAD
+    path: chart
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-sealed.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: alquimia-platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: alquimia-vault
+      jsonPointers:
+        - /data
+        - /stringData
+    - group: ""
+      kind: Secret
+      name: vault-keys
+      jsonPointers:
+        - /data
+        - /stringData

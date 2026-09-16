@@ -1,0 +1,152 @@
+{{- if .Values.runtime.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alquimia-config
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  DEBUG: {{ .Values.runtime.config.DEBUG | quote }}
+  IS_ALLOWED_CREDENTIALS: {{ .Values.runtime.config.IS_ALLOWED_CREDENTIALS | quote }}
+  ORAS_INSECURE: {{ .Values.runtime.config.ORAS_INSECURE | quote }}
+  ORAS_PLAIN_HTTP: {{ .Values.runtime.config.ORAS_PLAIN_HTTP | quote }}
+  ALQUIMIA_OCI_DEV_MODE: {{ .Values.runtime.config.ALQUIMIA_OCI_DEV_MODE | quote }}
+  ALQUIMIA_OCI_REGISTRY_DEFAULT: {{ printf "oras-registry.%s.svc.cluster.local:5000" (include "alquimia.namespace" .) | quote }}
+  ALQUIMIA_REGISTRY_DIR: {{ .Values.runtime.config.ALQUIMIA_REGISTRY_DIR | quote }}
+  ALQUIMIA_REGISTRY_SECRET_RESOLVER: {{ .Values.runtime.config.ALQUIMIA_REGISTRY_SECRET_RESOLVER | quote }}
+  VAULT_ADDR: {{ printf "http://vault.%s.svc.cluster.local:8200" (include "alquimia.namespace" .) | quote }}
+  VAULT_MOUNT_POINT: {{ .Values.runtime.config.VAULT_MOUNT_POINT | quote }}
+  KAFKA_MAX_REQUEST_SIZE: {{ .Values.runtime.config.KAFKA_MAX_REQUEST_SIZE | quote }}
+  KAFKA_BOOTSTRAP_SERVERS: {{ printf "kafka.%s.svc.cluster.local:9092" (include "alquimia.namespace" .) | quote }}
+{{- if eq (include "alquimia.helmSecrets" .) "true" }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-kafka-signing
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  KAFKA_SIGNING_KEY: {{ .Values.runtime.secrets.kafkaSigningKey | quote }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-redis
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  REDIS_URL: {{ printf "redis://redis.%s.svc.cluster.local:6379/0" (include "alquimia.namespace" .) | quote }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-postgres
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  POSTGRES_DB: {{ .Values.postgresql.auth.database | quote }}
+  POSTGRES_HOST: {{ printf "postgresql.%s.svc.cluster.local" (include "alquimia.namespace" .) | quote }}
+  POSTGRES_PASSWORD: {{ .Values.postgresql.auth.password | quote }}
+  POSTGRES_PORT: "5432"
+  POSTGRES_SCHEMA: postgresql
+  POSTGRES_USERNAME: {{ .Values.postgresql.auth.username | quote }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-s3
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  BLOB_S3_ACCESS_KEY: {{ .Values.runtime.secrets.s3.accessKey | quote }}
+  BLOB_S3_BUCKET_NAME: {{ .Values.runtime.secrets.s3.bucketName | quote }}
+  BLOB_S3_ENDPOINT_URL: {{ printf "http://minio-service.%s.svc.cluster.local:9000" (include "alquimia.namespace" .) | quote }}
+  BLOB_S3_PROVIDER: {{ .Values.runtime.secrets.s3.provider | quote }}
+  BLOB_S3_REGION_NAME: {{ .Values.runtime.secrets.s3.region | quote }}
+  BLOB_S3_SECRET_KEY: {{ .Values.runtime.secrets.s3.secretKey | quote }}
+  BLOB_S3_SECURE: {{ .Values.runtime.secrets.s3.secure | quote }}
+  REGISTRY_S3_BUCKET_NAME: {{ .Values.runtime.secrets.s3.registryBucketName | quote }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-auth
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  API_TOKEN: {{ .Values.runtime.secrets.apiToken | quote }}
+{{- end }}
+{{- if or (eq (include "alquimia.helmSecrets" .) "true") (and .Values.vault.enabled .Values.vault.autoUnseal) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-vault
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  {{- if and .Values.vault.enabled .Values.vault.autoUnseal }}
+  VAULT_TOKEN: pending
+  {{- else }}
+  VAULT_TOKEN: {{ .Values.runtime.secrets.vaultToken | quote }}
+  {{- end }}
+{{- end }}
+{{- $sealed := .Values.sealedSecrets | default dict }}
+{{- if and (ne (include "alquimia.helmSecrets" .) "true") (not (index $sealed "alquimia-registry-config")) (not (and .Values.registry.dockerconfig.username .Values.registry.dockerconfig.password)) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-registry-config
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: '{"auths":{}}'
+{{- else if and (eq (include "alquimia.helmSecrets" .) "true") (not (and .Values.registry.dockerconfig.username .Values.registry.dockerconfig.password)) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-registry-config
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: '{"auths":{}}'
+{{- end }}
+{{- end }}

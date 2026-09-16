@@ -1,0 +1,193 @@
+{{- if .Values.kafka.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: kafka
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  type: ClusterIP
+  selector:
+    app: kafka
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: kafka
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  serviceName: kafka
+  replicas: {{ .Values.kafka.replicas }}
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.kafka.nodeAffinity) | nindent 6 }}
+      securityContext: {}
+      initContainers:
+        - name: prepare-config
+          image: {{ .Values.images.kafka | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              cp -a /opt/kafka/config/. /mnt/config/
+              mkdir -p /mnt/data/kafka-log
+              rm -rf /mnt/data/lost+found || true
+              chmod -R a+rwX /mnt/config /mnt/tmp /mnt/logs /mnt/data/kafka-log || true
+          volumeMounts:
+            - name: kafka-config
+              mountPath: /mnt/config
+            - name: kafka-tmp
+              mountPath: /mnt/tmp
+            - name: kafka-logs
+              mountPath: /mnt/logs
+            - name: data
+              mountPath: /mnt/data
+          securityContext: {}
+      containers:
+        - name: kafka
+          image: {{ .Values.images.kafka | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: kafka
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          env:
+            - name: CLUSTER_ID
+              value: {{ .Values.kafka.clusterId | quote }}
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_LISTENERS
+              value: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: {{ printf "PLAINTEXT://kafka.%s.svc.cluster.local:9092" (include "alquimia.namespace" .) | quote }}
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: 1@127.0.0.1:9093
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data/kafka-log
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "true"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms256m -Xmx512m"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+            - name: kafka-config
+              mountPath: /opt/kafka/config
+            - name: kafka-tmp
+              mountPath: /tmp
+            - name: kafka-logs
+              mountPath: /opt/kafka/logs
+          securityContext: {}
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 40
+            periodSeconds: 20
+      volumes:
+        - name: kafka-config
+          emptyDir: {}
+        - name: kafka-tmp
+          emptyDir: {}
+        - name: kafka-logs
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.kafka.storage }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init-topics
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: kafka
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 30
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.kafka.nodeAffinity) | nindent 6 }}
+      securityContext: {}
+      containers:
+        - name: init-topics
+          image: {{ .Values.images.kafka | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Waiting for Kafka..."
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1; do
+                sleep 5
+              done
+              {{- range .Values.kafka.topics }}
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+                --topic {{ .name | quote }} \
+                --partitions {{ .partitions }} \
+                --replication-factor {{ .replicationFactor }} \
+                --config cleanup.policy=delete \
+                --config retention.ms=604800000
+              {{- end }}
+              echo "Topics ready."
+          securityContext: {}
+{{- end }}

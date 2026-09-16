@@ -1,0 +1,137 @@
+# En Argo CD se pueden sobreescribir en spec.source.helm.values / valueFiles.
+
+namespace: alquimia-platform
+# Si el Project/Namespace ya existe, el chart no lo recrea (lookup).
+# true: lo crea solo cuando falta. false: nunca lo gestiona el chart.
+createNamespace: true
+
+# sealed: Argo CD aplica SealedSecret (values-sealed.yaml). Helm no crea Secrets.
+# helm: crea Secrets desde values (solo local, no GitOps).
+secrets:
+  backend: sealed
+
+sealedSecrets: {}
+
+# Vacío: se toma de ingresses.config.openshift.io/cluster (spec.domain).
+appsDomain: ""
+
+# Opcional. Si está vacío no se setea affinity.
+# Un componente puede sobreescribirlo con minio.nodeAffinity, kafka.nodeAffinity, etc.
+nodeAffinity: {}
+  # requiredDuringSchedulingIgnoredDuringExecution:
+  #   nodeSelectorTerms:
+  #     - matchExpressions:
+  #         - key: node-role.kubernetes.io/worker
+  #           operator: Exists
+
+imagePullSecret:
+  create: false
+  name: alquimia-dockerhub-pull
+  server: https://index.docker.io/v1/
+  username: ""
+  password: ""
+
+images:
+  minio: quay.io/minio/minio:RELEASE.2023-10-24T04-42-36Z
+  postgres: docker.io/library/postgres:16
+  redis: redis:7
+  registry: ghcr.io/oras-project/registry:latest
+  rclone: rclone/rclone:latest
+  runtime: alquimiaai/runtime:0.5.0
+  studio: alquimiaai/studio:latest-20260714-2037
+  vault: docker.io/hashicorp/vault:1.21.2
+  kafka: apache/kafka:3.8.0
+  curl: curlimages/curl:8.11.1
+
+minio:
+  enabled: true
+  storage: 100Gi
+  auth:
+    rootUser: ""
+    rootPassword: ""
+
+kafka:
+  enabled: true
+  replicas: 1
+  storage: 100Gi
+  clusterId: MkU3OEVBNTcwNTJENDM2Qk
+  topics:
+    - name: alquimia.events
+      partitions: 6
+      replicationFactor: 1
+    - name: alquimia.events.dlq
+      partitions: 3
+      replicationFactor: 1
+
+postgresql:
+  enabled: true
+  storage: 200Gi
+  auth:
+    database: runtime
+    username: appuser
+    password: ""
+
+redis:
+  enabled: true
+  storage: 25Gi
+
+registry:
+  enabled: true
+  storage: 10Gi
+  htpasswd: ""
+  dockerconfig:
+    username: ""
+    password: ""
+
+vault:
+  enabled: true
+  storage: 10Gi
+  autoUnseal: true
+  keyShares: 1
+  keyThreshold: 1
+  keysSecret: vault-keys
+
+runtime:
+  enabled: true
+  masterReplicas: 1
+  workerReplicas: 3
+  registryStorage: 10Gi
+  config:
+    DEBUG: "False"
+    IS_ALLOWED_CREDENTIALS: "False"
+    ORAS_INSECURE: "true"
+    ORAS_PLAIN_HTTP: "true"
+    ALQUIMIA_OCI_DEV_MODE: "true"
+    ALQUIMIA_REGISTRY_DIR: /var/lib/alquimia/registry
+    ALQUIMIA_REGISTRY_SECRET_RESOLVER: vault
+    VAULT_MOUNT_POINT: cubbyhole
+    KAFKA_MAX_REQUEST_SIZE: "10485760"
+  secrets:
+    kafkaSigningKey: ""
+    apiToken: ""
+    vaultToken: ""
+    s3:
+      accessKey: ""
+      secretKey: ""
+      bucketName: alquimia-runtime-blob-storage
+      registryBucketName: alquimia-runtime-registry-storage
+      provider: Minio
+      region: us-east-1
+      secure: "false"
+
+studio:
+  enabled: true
+  replicas: 1
+  storage: 5Gi
+  # Vacío: alquimia-studio.<appsDomain> (dominio apps del cluster).
+  host: ""
+  config:
+    DB_STRATEGY: lite
+    AUTH_STRATEGY: lite
+    NEXT_PUBLIC_DEFAULT_NAMESPACE: alquimia
+    OTEL_SDK_DISABLED: "true"
+    NODE_ENV: production
+  secrets:
+    authLiteUsers: ""
+    assistantApiKey: ""
+    nextAuthSecret: ""

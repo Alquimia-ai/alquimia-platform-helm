@@ -1,0 +1,14 @@
+{{- if .Values.createNamespace }}
+{{- $nsName := include "alquimia.namespace" . }}
+{{- $existing := lookup "v1" "Namespace" "" $nsName }}
+{{- if not $existing }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $nsName }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+{{- end }}
+{{- end }}

@@ -1,0 +1,128 @@
+{{- if .Values.registry.enabled }}
+{{- if eq (include "alquimia.helmSecrets" .) "true" }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oras-registry-auth
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: oras-registry
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  auth.htpasswd: {{ .Values.registry.htpasswd | quote }}
+---
+{{- if and .Values.registry.dockerconfig.username .Values.registry.dockerconfig.password }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-registry-config
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: oras-registry
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: |
+    {"auths":{"oras-registry.{{ include "alquimia.namespace" . }}.svc.cluster.local:5000":{"username":{{ .Values.registry.dockerconfig.username | quote }},"password":{{ .Values.registry.dockerconfig.password | quote }}}}}
+---
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: oras-registry
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: oras-registry
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  type: ClusterIP
+  selector:
+    app: oras-registry
+  ports:
+    - name: registry
+      port: 5000
+      targetPort: 5000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oras-registry
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: oras-registry
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  serviceName: oras-registry
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oras-registry
+  template:
+    metadata:
+      labels:
+        app: oras-registry
+    spec:
+      {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.registry.nodeAffinity) | nindent 6 }}
+      containers:
+        - name: registry
+          image: {{ .Values.images.registry | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: registry
+              containerPort: 5000
+          env:
+            - name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY
+              value: /var/lib/registry
+            - name: REGISTRY_AUTH
+              value: htpasswd
+            - name: REGISTRY_AUTH_HTPASSWD_REALM
+              value: ORAS Registry
+            - name: REGISTRY_AUTH_HTPASSWD_PATH
+              value: /auth/auth.htpasswd
+          volumeMounts:
+            - name: registry-data
+              mountPath: /var/lib/registry
+            - name: registry-auth
+              mountPath: /auth
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: registry-auth
+          secret:
+            secretName: oras-registry-auth
+  volumeClaimTemplates:
+    - metadata:
+        name: registry-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.registry.storage }}
+{{- end }}

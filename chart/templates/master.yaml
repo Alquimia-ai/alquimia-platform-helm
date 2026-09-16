@@ -1,0 +1,268 @@
+{{- if .Values.runtime.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alquimia-registry-s3
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-runtime
+    role: master
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.runtime.registryStorage }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alquimia-runtime-master
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-runtime
+    app.kubernetes.io/part-of: alquimia
+    role: master
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: {{ .Values.runtime.masterReplicas }}
+  selector:
+    matchLabels:
+      app: alquimia-runtime
+      app.kubernetes.io/part-of: alquimia
+      role: master
+  template:
+    metadata:
+      labels:
+        app: alquimia-runtime
+        app.kubernetes.io/part-of: alquimia
+        role: master
+    spec:
+      {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.runtime.nodeAffinity) | nindent 6 }}
+      restartPolicy: Always
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret.name }}
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        supplementalGroups:
+          - 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        {{- if and .Values.vault.enabled .Values.vault.autoUnseal }}
+        {{- include "alquimia.waitVaultInit" . | nindent 8 }}
+        {{- end }}
+        - name: create-bucket
+          image: {{ .Values.images.rclone | quote }}
+          imagePullPolicy: Always
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Ensuring bucket ${S3_BUCKET} exists..."
+              rclone mkdir :s3:${S3_BUCKET} \
+                --s3-provider ${RCLONE_S3_PROVIDER} \
+                --s3-endpoint ${RCLONE_S3_ENDPOINT} \
+                --s3-access-key-id ${RCLONE_S3_ACCESS_KEY_ID} \
+                --s3-secret-access-key ${RCLONE_S3_SECRET_ACCESS_KEY} \
+                --s3-env-auth=false \
+                -v
+              echo "Bucket ready."
+          env:
+            - name: RCLONE_S3_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_PROVIDER
+            - name: RCLONE_S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_ENDPOINT_URL
+            - name: RCLONE_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_ACCESS_KEY
+            - name: RCLONE_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_SECRET_KEY
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_BUCKET_NAME
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+      containers:
+        - name: s3-sync
+          image: {{ .Values.images.rclone | quote }}
+          imagePullPolicy: Always
+          command:
+            - /bin/sh
+            - -c
+            - |
+              while true; do
+                echo "Syncing registry..."
+                rclone sync /var/lib/alquimia/registry :s3:${S3_BUCKET}/registry \
+                  --s3-provider ${RCLONE_S3_PROVIDER} \
+                  --s3-endpoint ${RCLONE_S3_ENDPOINT} \
+                  --s3-access-key-id ${RCLONE_S3_ACCESS_KEY_ID} \
+                  --s3-secret-access-key ${RCLONE_S3_SECRET_ACCESS_KEY} \
+                  --s3-env-auth=false \
+                  -v
+                echo "Sync done. Sleeping ${SYNC_INTERVAL:-30}s"
+                sleep ${SYNC_INTERVAL:-30}
+              done
+          env:
+            - name: RCLONE_S3_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_PROVIDER
+            - name: RCLONE_S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_ENDPOINT_URL
+            - name: RCLONE_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_ACCESS_KEY
+            - name: RCLONE_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_SECRET_KEY
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: REGISTRY_S3_BUCKET_NAME
+          volumeMounts:
+            - name: registry-storage
+              mountPath: /var/lib/alquimia/registry
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+        - name: alquimia-runtime
+          image: {{ .Values.images.runtime | quote }}
+          imagePullPolicy: Always
+          env:
+            - name: ALQUIMIA_RUNTIME_MODE
+              value: master
+            - name: ALQUIMIA_REGISTRY_DIR
+              value: /var/lib/alquimia/registry
+            - name: DOCKER_CONFIG
+              value: /var/docker-config
+            - name: HF_HOME
+              value: /var/lib/alquimia/cache
+          envFrom:
+            - configMapRef:
+                name: alquimia-config
+            - secretRef:
+                name: alquimia-kafka-signing
+            - secretRef:
+                name: alquimia-redis
+            - secretRef:
+                name: alquimia-postgres
+            - secretRef:
+                name: alquimia-s3
+            - secretRef:
+                name: alquimia-auth
+            - secretRef:
+                name: alquimia-vault
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: registry-storage
+              mountPath: /var/lib/alquimia/registry
+            - name: registry-config
+              readOnly: true
+              mountPath: /var/docker-config
+            - name: cache-storage
+              mountPath: /var/lib/alquimia/cache
+          resources:
+            limits:
+              cpu: "1"
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /health/liveness
+              port: 8080
+              scheme: HTTP
+            timeoutSeconds: 1
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 10
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /health/liveness
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 30
+            failureThreshold: 6
+      volumes:
+        - name: registry-storage
+          persistentVolumeClaim:
+            claimName: alquimia-registry-s3
+        - name: cache-storage
+          emptyDir: {}
+        - name: registry-config
+          secret:
+            secretName: alquimia-registry-config
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+            defaultMode: 420
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alquimia-runtime-master
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-runtime
+    role: master
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  type: ClusterIP
+  selector:
+    app: alquimia-runtime
+    app.kubernetes.io/part-of: alquimia
+    role: master
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+{{- end }}

@@ -1,0 +1,169 @@
+{{- if .Values.studio.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alquimia-studio-data
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-studio
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.studio.storage }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alquimia-studio-config
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-studio
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  DB_STRATEGY: {{ .Values.studio.config.DB_STRATEGY | quote }}
+  AUTH_STRATEGY: {{ .Values.studio.config.AUTH_STRATEGY | quote }}
+  ASSISTANT_BASEURL: {{ printf "http://alquimia-runtime-master.%s.svc.cluster.local:8080" (include "alquimia.namespace" .) | quote }}
+  NEXT_PUBLIC_DEFAULT_NAMESPACE: {{ .Values.studio.config.NEXT_PUBLIC_DEFAULT_NAMESPACE | quote }}
+  OTEL_SDK_DISABLED: {{ .Values.studio.config.OTEL_SDK_DISABLED | quote }}
+  NODE_ENV: {{ .Values.studio.config.NODE_ENV | quote }}
+  {{- with (include "alquimia.studioHost" . | trim) }}
+  NEXT_PUBLIC_APP_URL: {{ printf "https://%s" . | quote }}
+  {{- end }}
+{{- if eq (include "alquimia.helmSecrets" .) "true" }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-studio-secrets
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-studio
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  AUTH_LITE_USERS: {{ .Values.studio.secrets.authLiteUsers | quote }}
+  ALQUIMIA_ASSISTANT_API_KEY: {{ .Values.studio.secrets.assistantApiKey | quote }}
+  NEXTAUTH_SECRET: {{ .Values.studio.secrets.nextAuthSecret | quote }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alquimia-studio
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-studio
+    app.kubernetes.io/part-of: alquimia
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: {{ .Values.studio.replicas }}
+  selector:
+    matchLabels:
+      app: alquimia-studio
+  template:
+    metadata:
+      labels:
+        app: alquimia-studio
+        app.kubernetes.io/part-of: alquimia
+      annotations:
+        checksum/studio-host: {{ include "alquimia.studioHost" . | sha256sum }}
+    spec:
+      {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.studio.nodeAffinity) | nindent 6 }}
+      securityContext: {}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret.name }}
+      containers:
+        - name: alquimia-studio
+          image: {{ .Values.images.studio | quote }}
+          imagePullPolicy: Always
+          # Imagen hace chown+su-exec a nextjs; en OpenShift el UID aleatorio no puede.
+          command:
+            - /bin/sh
+            - -c
+            - mkdir -p "${NEDB_DATA_DIR:-/app/.data}" && exec node /app/server.js
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NEDB_DATA_DIR
+              value: /app/.data
+          envFrom:
+            - configMapRef:
+                name: alquimia-studio-config
+            - secretRef:
+                name: alquimia-studio-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 750m
+              memory: 1Gi
+          securityContext: {}
+          volumeMounts:
+            - name: studio-data
+              mountPath: /app/.data
+              subPath: studio
+      volumes:
+        - name: studio-data
+          persistentVolumeClaim:
+            claimName: alquimia-studio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alquimia-studio
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-studio
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  type: ClusterIP
+  selector:
+    app: alquimia-studio
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: alquimia-studio
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-studio
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  {{- with (include "alquimia.studioHost" . | trim) }}
+  host: {{ . | quote }}
+  {{- end }}
+  to:
+    kind: Service
+    name: alquimia-studio
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+{{- end }}

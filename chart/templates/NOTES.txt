@@ -1,0 +1,37 @@
+Chart alquimia desplegado en el namespace {{ include "alquimia.namespace" . }}.
+{{- if .Values.createNamespace }}
+Namespace: se crea solo si no existe.
+{{- else }}
+Namespace: no lo gestiona el chart (debe existir de antemano).
+{{- end }}
+
+Secrets: backend={{ .Values.secrets.backend | default "sealed" }}.
+{{- if eq (.Values.secrets.backend | default "sealed") "sealed" }}
+Helm no crea Secrets en claro. Hay que generar values-sealed.yaml:
+
+  kubeseal --fetch-cert --controller-namespace sealed-secrets --controller-name sealed-secrets > sealed-cert.pem
+  ./chart/scripts/seal-secrets.sh sealed-cert.pem
+
+El controller de Sealed Secrets debe existir en el cluster.
+No sellar alquimia-vault ni vault-keys: los escribe vault-unsealer.
+{{- end }}
+
+{{- if .Values.vault.enabled }}
+Vault queda instalado en este chart (StatefulSet `vault`).
+{{- if .Values.vault.autoUnseal }}
+El Deployment `vault-unsealer` hace init + unseal en bucle y guarda
+las keys en el secret {{ .Values.vault.keysSecret }}. El root token
+se escribe en `alquimia-vault` (VAULT_TOKEN).
+Si se pierde ese secret y el PVC de Vault sigue, no hay forma de unsealar.
+{{- end }}
+{{- end }}
+
+El secret de pull ({{ .Values.imagePullSecret.name }}) debe existir como
+SealedSecret (archivo .dockerconfigjson en secrets/local).
+{{- if .Values.studio.enabled }}
+{{- $studioHost := include "alquimia.studioHost" . | trim }}
+{{- if $studioHost }}
+
+Studio: https://{{ $studioHost }}
+{{- end }}
+{{- end }}
