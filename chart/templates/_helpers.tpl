@@ -48,6 +48,48 @@ affinity:
 {{- end -}}
 {{- end }}
 
+{{- define "alquimia.keycloakHost" -}}
+{{- if .Values.keycloak.host -}}
+{{- .Values.keycloak.host -}}
+{{- else if (include "alquimia.appsDomain" .) -}}
+{{- printf "keycloak.%s" (include "alquimia.appsDomain" .) -}}
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.keycloakUrl" -}}
+{{- if not .Values.keycloak.enabled -}}
+{{- $ex := .Values.keycloak.existing | default dict -}}
+{{- if $ex.url -}}
+{{- $ex.url -}}
+{{- else if and $ex.service $ex.namespace -}}
+{{- printf "http://%s.%s.svc.cluster.local:%v" $ex.service $ex.namespace ($ex.port | default 8080) -}}
+{{- end -}}
+{{- else -}}
+{{- $host := include "alquimia.keycloakHost" . | trim -}}
+{{- if $host -}}
+{{- printf "https://%s" $host -}}
+{{- else -}}
+{{- printf "http://keycloak.%s.svc.cluster.local:8080" (include "alquimia.namespace" .) -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.keycloakIssuer" -}}
+{{- $url := include "alquimia.keycloakUrl" . | trim -}}
+{{- if $url -}}
+{{- printf "%s/realms/%s" (trimSuffix "/" $url) (.Values.keycloak.realm | default "alquimia") -}}
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.otelUrl" -}}
+{{- $base := trimSuffix "/" .endpoint -}}
+{{- $path := .path | default "" -}}
+{{- if and $path (not (hasPrefix "/" $path)) -}}
+{{- $path = printf "/%s" $path -}}
+{{- end -}}
+{{- printf "%s%s" $base $path -}}
+{{- end }}
+
 {{- define "alquimia.hasNodeAffinity" -}}
 {{- $na := .local | default dict -}}
 {{- if empty $na }}

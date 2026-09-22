@@ -1,0 +1,366 @@
+{{- $ex := .Values.keycloak.existing | default dict }}
+{{- $runtimeAuth := .Values.keycloak.runtimeAuth | default dict }}
+{{- $studioAuth := .Values.keycloak.studioAuth | default dict }}
+{{- if and .Values.keycloak.enabled (or $ex.url $ex.service) }}
+{{- fail "keycloak.enabled instala Keycloak. Para una instancia ya existente usar enabled: false y existing.url o existing.service" }}
+{{- end }}
+{{- if and (not .Values.keycloak.enabled) $ex.service (not $ex.url) (not $ex.namespace) }}
+{{- fail "keycloak.existing.service requiere keycloak.existing.namespace" }}
+{{- end }}
+{{- $kcUrl := include "alquimia.keycloakUrl" . | trim }}
+{{- if and (or $runtimeAuth.enabled $studioAuth.enabled) (not $kcUrl) }}
+{{- fail "keycloak.runtimeAuth o keycloak.studioAuth requieren keycloak.enabled, o existing.url / existing.service" }}
+{{- end }}
+{{- if and $studioAuth.enabled (not .Values.studio.enabled) }}
+{{- fail "keycloak.studioAuth.enabled requiere studio.enabled" }}
+{{- end }}
+{{- if and $runtimeAuth.enabled (not .Values.runtime.enabled) }}
+{{- fail "keycloak.runtimeAuth.enabled requiere runtime.enabled" }}
+{{- end }}
+{{- if $kcUrl }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-config
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: keycloak
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  KEYCLOAK_URL: {{ $kcUrl | quote }}
+  KEYCLOAK_REALM: {{ .Values.keycloak.realm | default "alquimia" | quote }}
+  KEYCLOAK_ISSUER: {{ include "alquimia.keycloakIssuer" . | quote }}
+  {{- if not .Values.keycloak.enabled }}
+  {{- with $ex.secretName }}
+  KEYCLOAK_SECRET: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+{{- if .Values.keycloak.enabled }}
+{{- if not .Values.postgresql.enabled }}
+{{- fail "keycloak.enabled requiere postgresql.enabled: Keycloak usa el PostgreSQL del chart" }}
+{{- end }}
+{{- $ns := include "alquimia.namespace" . }}
+{{- $dbHost := printf "postgresql.%s.svc.cluster.local" $ns }}
+{{- $kcHost := include "alquimia.keycloakHost" . | trim }}
+---
+{{- if eq (include "alquimia.helmSecrets" .) "true" }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-secret
+  namespace: {{ $ns }}
+  labels:
+    app: keycloak
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  KC_BOOTSTRAP_ADMIN_USERNAME: {{ .Values.keycloak.auth.username | quote }}
+  KC_BOOTSTRAP_ADMIN_PASSWORD: {{ .Values.keycloak.auth.password | quote }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: {{ $ns }}
+  labels:
+    app: keycloak
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: {{ .Values.keycloak.replicas }}
+  selector:
+    matchLabels:
+      app: keycloak
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: keycloak
+      annotations:
+        checksum/keycloak-host: {{ $kcHost | sha256sum }}
+    spec:
+      {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.keycloak.nodeAffinity) | nindent 6 }}
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-db
+          image: {{ .Values.images.postgres | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              export HOME=/tmp
+              echo "Waiting for PostgreSQL..."
+              until pg_isready -h "$PGHOST" -U "$PGUSER"; do
+                sleep 3
+              done
+              psql -h "$PGHOST" -U "$PGUSER" -d postgres -v ON_ERROR_STOP=1 -v db="$KC_DB" <<'SQL'
+              SELECT format('CREATE DATABASE %I', :'db')
+              WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'db')
+              \gexec
+              SQL
+              echo "Database ${KC_DB} ready."
+          env:
+            - name: PGHOST
+              value: {{ $dbHost | quote }}
+            - name: KC_DB
+              value: {{ .Values.keycloak.database | quote }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-postgresql-secret
+                  key: POSTGRES_USER
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-postgresql-secret
+                  key: POSTGRES_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      containers:
+        - name: keycloak
+          image: {{ .Values.images.keycloak | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - start
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: {{ printf "jdbc:postgresql://%s:5432/%s" $dbHost .Values.keycloak.database | quote }}
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-postgresql-secret
+                  key: POSTGRES_USER
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-postgresql-secret
+                  key: POSTGRES_PASSWORD
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret
+                  key: KC_BOOTSTRAP_ADMIN_USERNAME
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret
+                  key: KC_BOOTSTRAP_ADMIN_PASSWORD
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_HTTP_PORT
+              value: "8080"
+            - name: KC_HTTP_MANAGEMENT_PORT
+              value: "9000"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HOSTNAME_STRICT
+              value: {{ if $kcHost }}"true"{{ else }}"false"{{ end }}
+            {{- if $kcHost }}
+            - name: KC_HOSTNAME
+              value: {{ $kcHost | quote }}
+            {{- end }}
+            - name: KC_CACHE
+              value: {{ if gt (int .Values.keycloak.replicas) 1 }}ispn{{ else }}local{{ end }}
+            {{- if gt (int .Values.keycloak.replicas) 1 }}
+            - name: KC_CACHE_STACK
+              value: kubernetes
+            {{- end }}
+            - name: JAVA_OPTS_APPEND
+              value: {{ if gt (int .Values.keycloak.replicas) 1 }}{{ printf "-XX:MaxRAMPercentage=70.0 -Djgroups.dns.query=keycloak-headless.%s.svc.cluster.local" $ns | quote }}{{ else }}"-XX:MaxRAMPercentage=70.0"{{ end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: management
+              containerPort: 9000
+              protocol: TCP
+            {{- if gt (int .Values.keycloak.replicas) 1 }}
+            - name: jgroups
+              containerPort: 7800
+              protocol: TCP
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          startupProbe:
+            httpGet:
+              path: /health/started
+              port: management
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: {{ $ns }}
+  labels:
+    app: keycloak
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  type: ClusterIP
+  selector:
+    app: keycloak
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: http
+    - name: management
+      protocol: TCP
+      port: 9000
+      targetPort: management
+{{- if gt (int .Values.keycloak.replicas) 1 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-headless
+  namespace: {{ $ns }}
+  labels:
+    app: keycloak
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  clusterIP: None
+  selector:
+    app: keycloak
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: http
+    - name: jgroups
+      protocol: TCP
+      port: 7800
+      targetPort: jgroups
+{{- end }}
+{{- $exposure := .Values.keycloak.exposure | default "route" }}
+{{- if eq $exposure "route" }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: keycloak
+  namespace: {{ $ns }}
+  labels:
+    app: keycloak
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  {{- if $kcHost }}
+  host: {{ $kcHost | quote }}
+  {{- end }}
+  to:
+    kind: Service
+    name: keycloak
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+{{- else if eq $exposure "ingress" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  namespace: {{ $ns }}
+  labels:
+    app: keycloak
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    {{- with .Values.keycloak.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.keycloak.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- if and .Values.keycloak.ingress.tls.enabled $kcHost }}
+  tls:
+    - hosts:
+        - {{ $kcHost | quote }}
+      {{- with .Values.keycloak.ingress.tls.secretName }}
+      secretName: {{ . | quote }}
+      {{- end }}
+  {{- end }}
+  rules:
+    - http:
+        paths:
+          - path: {{ .Values.keycloak.ingress.path | default "/" | quote }}
+            pathType: {{ .Values.keycloak.ingress.pathType | default "Prefix" }}
+            backend:
+              service:
+                name: keycloak
+                port:
+                  name: http
+      {{- if $kcHost }}
+      host: {{ $kcHost | quote }}
+      {{- end }}
+{{- else }}
+{{- fail "keycloak.exposure debe ser route o ingress" }}
+{{- end }}
+{{- end }}

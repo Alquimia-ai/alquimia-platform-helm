@@ -31,7 +31,7 @@ Opcional: `appsDomain` (dominio `apps.*` del cluster) o `studio.host`. Si Argo n
 ./chart/scripts/seal-secrets.sh
 ```
 
-Copia `chart/secrets/example/` → `chart/secrets/local/`. Completar los `CHANGE_ME` (MinIO, Postgres, Studio, API token, pull secret de Docker Hub, etc.).
+Copia `chart/secrets/example/` → `chart/secrets/local/`. Completar los `CHANGE_ME` (MinIO, Postgres, Keycloak, Studio, API token, pull secret de Docker Hub, etc.).
 
 Pull secret: `chart/secrets/local/alquimia-dockerhub-pull/.dockerconfigjson`.
 
@@ -81,6 +81,7 @@ Argo sincroniza solo. No hace falta `helm upgrade` en el cluster.
 1. Esperar Vault (unsealer hace init + unseal).
 2. **Respaldar** el secret `vault-keys`. Si se pierde y el PVC de Vault sigue, no hay forma de unsealar.
 3. Studio queda en `https://alquimia-studio.<appsDomain>` (o el host que hayan puesto).
+4. Keycloak, si `keycloak.enabled`, queda en `https://keycloak.<appsDomain>` (o `keycloak.host`). Usa el PostgreSQL del chart; no hace falta el Keycloak Operator. Con `enabled: false` y `existing.url` o `existing.service` no se instala: la URL queda en el ConfigMap `keycloak-config`. `keycloak.runtimeAuth.enabled` hace que el runtime valide JWT de ese realm (`AUTH_PROVIDER=keycloak`); si queda en false, el runtime sigue con `API_TOKEN`. `keycloak.studioAuth.enabled` pasa Studio de `AUTH_STRATEGY=lite` a Keycloak.
 
 ## Qué incluye el chart
 
@@ -89,7 +90,10 @@ Argo sincroniza solo. No hace falta `helm upgrade` en el cluster.
 | Infra | MinIO, Kafka (KRaft), PostgreSQL, Redis, ORAS registry, Vault |
 | Runtime | ConfigMap, master, workers (SA `default` + pull secret en el pod) |
 | Studio | Deployment, Service, Route |
+| Keycloak | Si `enabled`: Deployment, Service, Route o Ingress. Si no: ConfigMap `keycloak-config` hacia una instancia existente |
 
 Tabla de recursos y consumo: [docs/recursos.md](docs/recursos.md).
 
 `nodeAffinity` es opcional en `values.yaml`.
+
+`otel.enabled` exporta trazas, métricas y logs del runtime, y trazas y métricas de Studio, al collector OTLP HTTP de `otel.endpoint`. Con `otel.enabled: false`, Studio mantiene `OTEL_SDK_DISABLED`.

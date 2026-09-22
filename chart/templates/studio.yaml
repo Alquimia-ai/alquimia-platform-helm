@@ -1,4 +1,7 @@
 {{- if .Values.studio.enabled }}
+{{- if and .Values.otel.enabled (not .Values.otel.endpoint) }}
+{{- fail "otel.enabled requiere otel.endpoint (URL base OTLP HTTP del collector)" }}
+{{- end }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -28,13 +31,30 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1"
 data:
   DB_STRATEGY: {{ .Values.studio.config.DB_STRATEGY | quote }}
+  {{- if .Values.keycloak.studioAuth.enabled }}
+  AUTH_STRATEGY: keycloak
+  KEYCLOAK_ISSUER: {{ include "alquimia.keycloakIssuer" . | quote }}
+  KEYCLOAK_CLIENT_ID: {{ .Values.keycloak.studioAuth.clientId | quote }}
+  {{- else }}
   AUTH_STRATEGY: {{ .Values.studio.config.AUTH_STRATEGY | quote }}
+  {{- end }}
   ASSISTANT_BASEURL: {{ printf "http://alquimia-runtime-master.%s.svc.cluster.local:8080" (include "alquimia.namespace" .) | quote }}
   NEXT_PUBLIC_DEFAULT_NAMESPACE: {{ .Values.studio.config.NEXT_PUBLIC_DEFAULT_NAMESPACE | quote }}
+  {{- if .Values.otel.enabled }}
+  OTEL_SDK_DISABLED: "false"
+  OTEL_ALQUIMIA_SERVICE_NAME: alquimia-studio
+  OTEL_EXPORTER_INTERNAL_MILIS: {{ .Values.otel.intervalMillis | quote }}
+  OTEL_COLLECTOR_ENDPOINT_TRACES: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.tracesPath) | quote }}
+  OTEL_COLLECTOR_ENDPOINT: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.metricsPath) | quote }}
+  {{- else }}
   OTEL_SDK_DISABLED: {{ .Values.studio.config.OTEL_SDK_DISABLED | quote }}
+  {{- end }}
   NODE_ENV: {{ .Values.studio.config.NODE_ENV | quote }}
   {{- with (include "alquimia.studioHost" . | trim) }}
   NEXT_PUBLIC_APP_URL: {{ printf "https://%s" . | quote }}
+  {{- if $.Values.keycloak.studioAuth.enabled }}
+  NEXTAUTH_URL: {{ printf "https://%s" . | quote }}
+  {{- end }}
   {{- end }}
 {{- if eq (include "alquimia.helmSecrets" .) "true" }}
 ---
@@ -53,6 +73,9 @@ stringData:
   AUTH_LITE_USERS: {{ .Values.studio.secrets.authLiteUsers | quote }}
   ALQUIMIA_ASSISTANT_API_KEY: {{ .Values.studio.secrets.assistantApiKey | quote }}
   NEXTAUTH_SECRET: {{ .Values.studio.secrets.nextAuthSecret | quote }}
+  {{- if .Values.keycloak.studioAuth.enabled }}
+  KEYCLOAK_CLIENT_SECRET: {{ .Values.keycloak.studioAuth.clientSecret | quote }}
+  {{- end }}
 {{- end }}
 ---
 apiVersion: apps/v1

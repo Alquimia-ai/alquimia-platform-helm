@@ -184,6 +184,10 @@ spec:
                 name: alquimia-auth
             - secretRef:
                 name: alquimia-vault
+            {{- if .Values.keycloak.runtimeAuth.enabled }}
+            - secretRef:
+                name: alquimia-keycloak
+            {{- end }}
           ports:
             - name: http
               containerPort: 8080

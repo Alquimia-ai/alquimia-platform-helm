@@ -32,10 +32,48 @@ El SA {{ $sa.name | default "vault-unsealer" }} no lo crea el chart (docs/vault-
 
 El secret de pull ({{ .Values.imagePullSecret.name }}) debe existir como
 SealedSecret (archivo .dockerconfigjson en secrets/local).
+{{- if .Values.otel.enabled }}
+
+OpenTelemetry: runtime y Studio exportan a {{ .Values.otel.endpoint }}.
+{{- end }}
 {{- if .Values.studio.enabled }}
 {{- $studioHost := include "alquimia.studioHost" . | trim }}
 {{- if $studioHost }}
 
 Studio: https://{{ $studioHost }}
+{{- end }}
+{{- end }}
+{{- if .Values.keycloak.enabled }}
+{{- $keycloakHost := include "alquimia.keycloakHost" . | trim }}
+
+Keycloak usa el PostgreSQL de este chart (base {{ .Values.keycloak.database }}). No requiere el Keycloak Operator.
+El admin sale del secret keycloak-secret (KC_BOOTSTRAP_ADMIN_USERNAME / KC_BOOTSTRAP_ADMIN_PASSWORD).
+Issuer: {{ include "alquimia.keycloakIssuer" . }}
+{{- if .Values.keycloak.runtimeAuth.enabled }}
+Runtime: AUTH_PROVIDER=keycloak (client {{ .Values.keycloak.runtimeAuth.clientId }}).
+{{- else }}
+Runtime: sigue con API_TOKEN. Para JWT de usuarios, keycloak.runtimeAuth.enabled.
+{{- end }}
+{{- if .Values.keycloak.studioAuth.enabled }}
+Studio: autentica con este realm (client {{ .Values.keycloak.studioAuth.clientId }}).
+{{- else }}
+Studio: AUTH_STRATEGY={{ .Values.studio.config.AUTH_STRATEGY }}. keycloak.studioAuth.enabled lo pasa a Keycloak.
+{{- end }}
+{{- if $keycloakHost }}
+Consola: https://{{ $keycloakHost }}
+{{- end }}
+{{- else }}
+{{- $keycloakUrl := include "alquimia.keycloakUrl" . | trim }}
+{{- if $keycloakUrl }}
+
+Keycloak no lo instala este chart. Instancia existente: {{ $keycloakUrl }}
+Issuer: {{ include "alquimia.keycloakIssuer" . }}
+Queda referenciada en el ConfigMap keycloak-config.
+{{- if .Values.keycloak.runtimeAuth.enabled }}
+Runtime: AUTH_PROVIDER=keycloak (client {{ .Values.keycloak.runtimeAuth.clientId }}).
+{{- end }}
+{{- if .Values.keycloak.studioAuth.enabled }}
+Studio: autentica con este realm (client {{ .Values.keycloak.studioAuth.clientId }}).
+{{- end }}
 {{- end }}
 {{- end }}

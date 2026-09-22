@@ -1,4 +1,7 @@
 {{- if .Values.runtime.enabled }}
+{{- if and .Values.otel.enabled (not .Values.otel.endpoint) }}
+{{- fail "otel.enabled requiere otel.endpoint (URL base OTLP HTTP del collector)" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -21,6 +24,27 @@ data:
   VAULT_MOUNT_POINT: {{ .Values.runtime.config.VAULT_MOUNT_POINT | quote }}
   KAFKA_MAX_REQUEST_SIZE: {{ .Values.runtime.config.KAFKA_MAX_REQUEST_SIZE | quote }}
   KAFKA_BOOTSTRAP_SERVERS: {{ printf "kafka.%s.svc.cluster.local:9092" (include "alquimia.namespace" .) | quote }}
+  {{- if .Values.otel.enabled }}
+  OTEL_ALQUIMIA_SERVICE_NAME: alquimia
+  OTEL_ALQUIMIA_METER_NAME: alquimia-metrics
+  OTEL_EXPORTER_INTERVAL_MILLIS: {{ .Values.otel.intervalMillis | quote }}
+  OTEL_COLLECTOR_ENDPOINT_TRACES: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.tracesPath) | quote }}
+  OTEL_COLLECTOR_ENDPOINT_LOGS: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.logsPath) | quote }}
+  OTEL_COLLECTOR_ENDPOINT: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.metricsPath) | quote }}
+  {{- with .Values.otel.excludedAttributes }}
+  OTEL_EXCLUDED_ATTRIBUTES: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if .Values.keycloak.runtimeAuth.enabled }}
+  AUTH_PROVIDER: keycloak
+  KEYCLOAK_SERVER_URL: {{ trimSuffix "/" (include "alquimia.keycloakUrl" . | trim) | quote }}
+  KEYCLOAK_REALM: {{ .Values.keycloak.realm | quote }}
+  KEYCLOAK_CLIENT_ID: {{ .Values.keycloak.runtimeAuth.clientId | quote }}
+  KEYCLOAK_ACCEPTED_AUDIENCES: {{ .Values.keycloak.acceptedAudiences | quote }}
+  {{- with .Values.keycloak.runtimeAuth.callbackUri }}
+  KEYCLOAK_CALLBACK_URI: {{ . | quote }}
+  {{- end }}
+  {{- end }}
 {{- if eq (include "alquimia.helmSecrets" .) "true" }}
 ---
 apiVersion: v1
@@ -99,6 +123,21 @@ metadata:
 type: Opaque
 stringData:
   API_TOKEN: {{ .Values.runtime.secrets.apiToken | quote }}
+{{- if .Values.keycloak.runtimeAuth.enabled }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-keycloak
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  KEYCLOAK_CLIENT_SECRET: {{ .Values.keycloak.runtimeAuth.clientSecret | quote }}
+{{- end }}
 {{- end }}
 {{- if or (eq (include "alquimia.helmSecrets" .) "true") (and .Values.vault.enabled .Values.vault.autoUnseal) }}
 ---

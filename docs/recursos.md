@@ -14,3 +14,4 @@ Defaults de `chart/values.yaml`. Consumo = requests → limits del contenedor pr
 | Runtime master | Deployment `alquimia-runtime-master` | `alquimia-runtime-master` :8080 | PVC `alquimia-registry-s3` 10Gi | 500m / 1Gi → 1 / 2Gi | `default` |
 | Runtime workers | Deployment `alquimia-runtime-worker` ×3 | — | emptyDir | 500m / 1Gi → 1 / 2Gi (×3) | `default` |
 | Studio | Deployment `alquimia-studio` | `alquimia-studio` :3000 + Route | PVC `alquimia-studio-data` 5Gi | 250m / 512Mi → 750m / 1Gi | `default` |
+| Keycloak | Deployment `keycloak` | `keycloak` :8080 / :9000 + Route o Ingress | base `keycloak` en PostgreSQL del chart | 500m / 1Gi → 2 / 2Gi | `default` |

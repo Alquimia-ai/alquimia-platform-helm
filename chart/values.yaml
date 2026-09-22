@@ -42,6 +42,7 @@ images:
   vault: docker.io/hashicorp/vault:1.21.2
   kafka: apache/kafka:3.8.0
   curl: curlimages/curl:8.11.1
+  keycloak: quay.io/keycloak/keycloak:26.7.3
 
 minio:
   enabled: true
@@ -96,6 +97,20 @@ vault:
     create: true
     name: vault-unsealer
 
+# Collector OTLP HTTP compartido por runtime y Studio.
+# Documentación: OTEL_COLLECTOR_ENDPOINT* en Runtime configuration y Studio overview.
+# false: el runtime no exporta y Studio respeta OTEL_SDK_DISABLED.
+otel:
+  enabled: false
+  # Base sin /v1. Ej: http://otel-collector.observability.svc.cluster.local:4318
+  endpoint: ""
+  tracesPath: /v1/traces
+  metricsPath: /v1/metrics
+  logsPath: /v1/logs
+  intervalMillis: "5000"
+  # Solo runtime. Vacío: no se setea OTEL_EXCLUDED_ATTRIBUTES.
+  excludedAttributes: ""
+
 runtime:
   enabled: true
   masterReplicas: 1
@@ -124,6 +139,64 @@ runtime:
       region: us-east-1
       secure: "false"
 
+# Sin Keycloak Operator. Con enabled: true usa el PostgreSQL de este chart
+# (base `database`) en el mismo namespace.
+# Con enabled: false no instala nada: existing.url o existing.service apuntan
+# a una instancia que ya existe. El chart deja esa URL en el ConfigMap keycloak-config.
+keycloak:
+  # false: no crea Deployment, Service, Route ni Ingress.
+  enabled: true
+  existing:
+    # URL de la instancia externa. Tiene prioridad sobre service.
+    url: ""
+    # Service ya existente, normalmente en otro namespace.
+    service: ""
+    namespace: ""
+    port: 8080
+    # Secret ya existente con el admin. Solo se anota en keycloak-config.
+    secretName: ""
+  # Realm que emite los JWT de usuarios (OIDC).
+  realm: alquimia
+  acceptedAudiences: account,alquimia-cli
+  # Zero Trust de callers: el runtime valida JWT del realm (AUTH_PROVIDER=keycloak).
+  # false: sigue autenticando servicios con API_TOKEN.
+  runtimeAuth:
+    enabled: false
+    clientId: alquimia-runtime
+    clientSecret: ""
+    callbackUri: ""
+  # Studio puede quedar en AUTH_STRATEGY=lite. true lo pasa a Keycloak (NextAuth).
+  studioAuth:
+    enabled: false
+    clientId: alquimia-studio
+    clientSecret: ""
+  replicas: 1
+  database: keycloak
+  # Vacío: keycloak.<appsDomain> (dominio apps del cluster).
+  host: ""
+  # route (OpenShift) o ingress (EKS u otro cluster con Ingress).
+  exposure: route
+  ingress:
+    className: ""
+    path: /
+    pathType: Prefix
+    annotations: {}
+    # En EKS con AWS Load Balancer Controller, por ejemplo:
+    # className: alb
+    # annotations:
+    #   alb.ingress.kubernetes.io/scheme: internet-facing
+    #   alb.ingress.kubernetes.io/target-type: ip
+    #   alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    #   alb.ingress.kubernetes.io/ssl-redirect: "443"
+    #   alb.ingress.kubernetes.io/group.name: alquimia
+    #   alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/ID
+    tls:
+      enabled: false
+      secretName: ""
+  auth:
+    username: ""
+    password: ""
+
 studio:
   enabled: true
   replicas: 1
@@ -134,6 +207,7 @@ studio:
     DB_STRATEGY: lite
     AUTH_STRATEGY: lite
     NEXT_PUBLIC_DEFAULT_NAMESPACE: alquimia
+    # Se ignora si otel.enabled: el SDK queda activo para exportar al collector.
     OTEL_SDK_DISABLED: "true"
     NODE_ENV: production
   secrets:
