@@ -1,6 +1,6 @@
 # Recursos por aplicación
 
-Defaults de `chart/values.yaml`. Consumo = requests → limits del contenedor principal.
+Valores por defecto de `chart/values.yaml`. La columna de consumo indica request y limit del contenedor principal.
 
 | Aplicación | Workload | Service | Almacenamiento | Consumo | SA |
 |---|---|---|---|---|---|

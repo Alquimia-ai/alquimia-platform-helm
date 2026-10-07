@@ -1,10 +1,10 @@
 # Alquimia — chart de instalación
 
-Chart Helm de un namespace para Kubernetes, OpenShift y EKS. Los dominios de esta guía son de ejemplo (`acme.example`): el cliente los reemplaza. Contraseñas y la clave privada de cosign no van en este repo.
+Chart Helm de un namespace para Kubernetes, OpenShift y EKS. Los dominios de esta guía son de referencia (`acme.example`) y se sustituyen por los del entorno. Las credenciales y la clave privada de cosign no forman parte del repositorio.
 
 Qué se despliega y cuánto pide: [docs/recursos.md](docs/recursos.md).
 
-Qué hay que completar por cliente: [docs/configuracion.md](docs/configuracion.md).
+Parámetros de la instalación: [docs/configuracion.md](docs/configuracion.md).
 
 ## Requisitos
 
@@ -22,7 +22,7 @@ sudo install -m 755 kubeseal /usr/local/bin/kubeseal
 
 ## Valores
 
-`chart/values.yaml` es el perfil base, sin secretos. Encima va un values del cliente (no se commitea) o `chart/values-sealed.yaml`.
+`chart/values.yaml` es el perfil base, sin credenciales. La instalación lo combina con un archivo de values privado o con `chart/values-sealed.yaml`.
 
 El namespace de ejemplo del chart es `alquimia-platform`. Tiene que coincidir con `spec.destination.namespace` de `argocd/application.yaml`.
 
@@ -43,10 +43,10 @@ helm upgrade --install alquimia chart \
   --namespace acme \
   --create-namespace \
   -f chart/values.yaml \
-  -f values-cliente.yaml
+  -f values-instalacion.yaml
 ```
 
-`values-cliente.yaml` lleva los dominios, `secrets.backend: helm` y las contraseñas. No se sube al repo.
+`values-instalacion.yaml` define los dominios, `secrets.backend: helm` y las credenciales. Permanece fuera del repositorio.
 
 ## Instalación con Argo CD y Sealed Secrets
 
