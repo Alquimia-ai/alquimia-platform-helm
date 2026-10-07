@@ -1,0 +1,118 @@
+{{- if .Values.spire.enabled }}
+{{- $ns := include "alquimia.spire.namespace" . }}
+{{- $uid := .Values.spire.agentRunAsUser }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spire-agent
+  namespace: {{ $ns }}
+  labels:
+    app: spire-agent
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  selector:
+    matchLabels:
+      app: spire-agent
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: spire-agent
+        {{- include "alquimia.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: spire-agent
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- with .Values.spire.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.spire.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: fix-socket-dir-permissions
+          image: {{ .Values.images.busybox | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              chown {{ $uid }}:{{ $uid }} /run/spire/sockets
+              chmod 0755 /run/spire/sockets
+              if [ -f /sys/fs/selinux/enforce ]; then
+                setfattr -n security.selinux -v "system_u:object_r:container_file_t:s0" /run/spire/sockets
+              fi
+          volumeMounts:
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+          securityContext:
+            privileged: true
+      containers:
+        - name: spire-agent
+          image: {{ .Values.images.spireAgent | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config
+            - /run/spire/config/agent.conf
+          volumeMounts:
+            - name: spire-config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: spire-data
+              mountPath: /run/spire/agent/data
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+            - name: spire-token
+              mountPath: /var/run/secrets/tokens
+            - name: spire-bundle
+              mountPath: /run/spire/bundle
+              readOnly: true
+            {{- if eq (include "alquimia.spire.useKubeletCA" .) "true" }}
+            - name: kubelet-ca
+              mountPath: /run/spire/kubelet-ca
+              readOnly: true
+            {{- end }}
+          livenessProbe:
+            exec:
+              command: ["/opt/spire/bin/spire-agent", "healthcheck", "-socketPath", {{ include "alquimia.spire.socketPath" . | quote }}]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: {{ $uid }}
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: spire-config
+          configMap:
+            name: spire-agent
+        - name: spire-data
+          emptyDir: {}
+        - name: spire-agent-socket
+          hostPath:
+            path: {{ .Values.spire.socketHostPath | quote }}
+            type: DirectoryOrCreate
+        - name: spire-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: spire-agent
+                  expirationSeconds: 7200
+                  audience: spire-server
+        - name: spire-bundle
+          configMap:
+            name: spire-bundle
+        {{- if eq (include "alquimia.spire.useKubeletCA" .) "true" }}
+        - name: kubelet-ca
+          configMap:
+            name: spire-agent-kubelet-ca
+        {{- end }}
+{{- end }}

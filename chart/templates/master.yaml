@@ -31,6 +31,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   replicas: {{ .Values.runtime.masterReplicas }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: alquimia-runtime
@@ -43,15 +45,23 @@ spec:
         app.kubernetes.io/part-of: alquimia
         role: master
     spec:
+      {{- if .Values.runtime.zeroTrust.enabled }}
+      serviceAccountName: alquimia-runtime-sa
+      {{- end }}
       {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.runtime.nodeAffinity) | nindent 6 }}
       restartPolicy: Always
       imagePullSecrets:
         - name: {{ .Values.imagePullSecret.name }}
       terminationGracePeriodSeconds: 30
       securityContext:
+        seccompProfile:
+          type: RuntimeDefault
         supplementalGroups:
           - 1000
         fsGroupChangePolicy: OnRootMismatch
+        {{- if not (include "alquimia.isOpenShift" .) }}
+        fsGroup: 1000
+        {{- end }}
       initContainers:
         {{- if and .Values.vault.enabled .Values.vault.autoUnseal }}
         {{- include "alquimia.waitVaultInit" . | nindent 8 }}
@@ -103,6 +113,67 @@ spec:
               drop:
                 - ALL
             allowPrivilegeEscalation: false
+          {{- include "alquimia.helperResources" . | nindent 10 }}
+        {{- include "alquimia.registryTrustInit" . | nindent 8 }}
+        - name: fetch-registry
+          image: {{ .Values.images.rclone | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Restoring registry from S3 (no overwrite)..."
+              set +e
+              rclone copy :s3:${S3_BUCKET}/registry /var/lib/alquimia/registry \
+                --ignore-existing \
+                --s3-provider ${RCLONE_S3_PROVIDER} \
+                --s3-endpoint ${RCLONE_S3_ENDPOINT} \
+                --s3-access-key-id ${RCLONE_S3_ACCESS_KEY_ID} \
+                --s3-secret-access-key ${RCLONE_S3_SECRET_ACCESS_KEY} \
+                --s3-env-auth=false \
+                -v
+              rc=$?
+              set -e
+              if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+                echo "fetch-registry fallo: $rc"
+                exit "$rc"
+              fi
+              echo "fetch-registry listo (exit $rc)"
+          env:
+            - name: RCLONE_S3_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_PROVIDER
+            - name: RCLONE_S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_ENDPOINT_URL
+            - name: RCLONE_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_ACCESS_KEY
+            - name: RCLONE_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: BLOB_S3_SECRET_KEY
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-s3
+                  key: REGISTRY_S3_BUCKET_NAME
+          volumeMounts:
+            - name: registry-storage
+              mountPath: /var/lib/alquimia/registry
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+          {{- include "alquimia.helperResources" . | nindent 10 }}
       containers:
         - name: s3-sync
           image: {{ .Values.images.rclone | quote }}
@@ -157,6 +228,7 @@ spec:
               drop:
                 - ALL
             allowPrivilegeEscalation: false
+          {{- include "alquimia.helperResources" . | nindent 10 }}
         - name: alquimia-runtime
           image: {{ .Values.images.runtime | quote }}
           imagePullPolicy: Always
@@ -169,6 +241,35 @@ spec:
               value: /var/docker-config
             - name: HF_HOME
               value: /var/lib/alquimia/cache
+            - name: TMPDIR
+              value: /tmp
+            {{- include "alquimia.registryTrustEnv" . | nindent 12 }}
+            {{- if .Values.runtime.zeroTrust.enabled }}
+            - name: SPIFFE_ENABLED
+              value: "true"
+            - name: SPIFFE_SOCKET_PATH
+              value: {{ .Values.runtime.zeroTrust.socketPath | quote }}
+            - name: SPIFFE_TRUST_DOMAIN
+              value: {{ .Values.runtime.zeroTrust.trustDomain | quote }}
+            - name: VAULT_AUTH_METHOD
+              value: kubernetes
+            - name: VAULT_K8S_ROLE
+              value: alquimia-runtime-master
+            - name: VAULT_AUTH_ROLE
+              value: alquimia-runtime-master
+            - name: VAULT_K8S_TOKEN_PATH
+              value: /var/run/secrets/vault/service-account/vault-token
+            {{- if .Values.runtime.zeroTrust.agentspaceProvisioning }}
+            - name: AGENTSPACE_PROVISIONING_ENABLED
+              value: "true"
+            - name: AGENTSPACE_PROVISIONING_INTERVAL_SECONDS
+              value: {{ .Values.runtime.zeroTrust.provisioningIntervalSeconds | quote }}
+            - name: AGENTSPACE_PROVISIONING_K8S_NAMESPACE
+              value: {{ include "alquimia.agentspaceNamespace" . | quote }}
+            - name: AGENTSPACE_PROVISIONING_VAULT_JWT_AUTH_PATH
+              value: {{ .Values.runtime.zeroTrust.vaultJwtAuthPath | quote }}
+            {{- end }}
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: alquimia-config
@@ -182,11 +283,25 @@ spec:
                 name: alquimia-s3
             - secretRef:
                 name: alquimia-auth
+            {{- if not .Values.runtime.zeroTrust.enabled }}
             - secretRef:
                 name: alquimia-vault
-            {{- if .Values.keycloak.runtimeAuth.enabled }}
+            {{- end }}
+            {{- if eq (include "alquimia.runtimeKeycloak" .) "true" }}
             - secretRef:
                 name: alquimia-keycloak
+            {{- end }}
+            {{- if eq (include "alquimia.helmSecrets" .) "true" }}
+            - secretRef:
+                name: alquimia-qdrant
+            {{- end }}
+            {{- if and .Values.runtime.secrets.encryptionKey .Values.runtime.secrets.registryKey }}
+            - secretRef:
+                name: alquimia-encryption
+            {{- end }}
+            {{- if .Values.runtime.secrets.channelNotificationSecret }}
+            - secretRef:
+                name: alquimia-channel-notifications
             {{- end }}
           ports:
             - name: http
@@ -200,6 +315,23 @@ spec:
               mountPath: /var/docker-config
             - name: cache-storage
               mountPath: /var/lib/alquimia/cache
+            - name: tmp
+              mountPath: /tmp
+            {{- include "alquimia.registryTrustMount" . | nindent 12 }}
+            {{- if .Values.runtime.cosign.publicKey }}
+            - name: cosign-key
+              mountPath: /etc/alquimia/cosign
+              readOnly: true
+            {{- end }}
+            {{- if .Values.runtime.zeroTrust.enabled }}
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            - name: vault-k8s-token
+              mountPath: /var/run/secrets/vault/service-account
+              readOnly: true
+            {{- end }}
+          {{- include "alquimia.runtimeContainerSecurity" . | nindent 10 }}
           resources:
             limits:
               cpu: "1"
@@ -239,6 +371,15 @@ spec:
             claimName: alquimia-registry-s3
         - name: cache-storage
           emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- include "alquimia.registryTrustVolumes" . | nindent 8 }}
+        {{- if .Values.runtime.cosign.publicKey }}
+        - name: cosign-key
+          configMap:
+            name: alquimia-cosign
+            defaultMode: 0444
+        {{- end }}
         - name: registry-config
           secret:
             secretName: alquimia-registry-config
@@ -246,6 +387,20 @@ spec:
               - key: .dockerconfigjson
                 path: config.json
             defaultMode: 420
+        {{- if .Values.runtime.zeroTrust.enabled }}
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: vault-k8s-token
+          projected:
+            defaultMode: 288
+            sources:
+              - serviceAccountToken:
+                  path: vault-token
+                  expirationSeconds: 3600
+                  audience: vault
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -269,4 +424,71 @@ spec:
       port: 8080
       targetPort: http
       protocol: TCP
+{{- $exposure := .Values.runtime.exposure | default "cluster" }}
+{{- $host := .Values.runtime.host | default "" }}
+{{- if eq $exposure "ingress" }}
+{{- if not $host }}
+{{- fail "runtime.exposure ingress requiere runtime.host" }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: alquimia-runtime-master
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-runtime
+    role: master
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    {{- with .Values.runtime.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.runtime.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.runtime.ingress.path | default "/" | quote }}
+            pathType: {{ .Values.runtime.ingress.pathType | default "Prefix" }}
+            backend:
+              service:
+                name: alquimia-runtime-master
+                port:
+                  name: http
+{{- else if eq $exposure "route" }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: alquimia-runtime-master
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-runtime
+    role: master
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  {{- if $host }}
+  host: {{ $host | quote }}
+  {{- end }}
+  to:
+    kind: Service
+    name: alquimia-runtime-master
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+{{- else if ne $exposure "cluster" }}
+{{- fail "runtime.exposure tiene que ser cluster, ingress o route" }}
+{{- end }}
 {{- end }}

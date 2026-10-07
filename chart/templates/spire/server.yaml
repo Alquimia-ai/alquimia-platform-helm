@@ -1,0 +1,215 @@
+{{- if .Values.spire.enabled }}
+{{- $ns := include "alquimia.spire.namespace" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-server
+  namespace: {{ $ns }}
+  labels:
+    app: spire-server
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  type: ClusterIP
+  selector:
+    app: spire-server
+  ports:
+    - name: grpc
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-oidc-discovery-provider
+  namespace: {{ $ns }}
+  labels:
+    app: spire-server
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  type: ClusterIP
+  selector:
+    app: spire-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: oidc-http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: spire-server
+  namespace: {{ $ns }}
+  labels:
+    app: spire-server
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  serviceName: spire-server
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spire-server
+  template:
+    metadata:
+      labels:
+        app: spire-server
+        {{- include "alquimia.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: spire-server
+      {{- with .Values.spire.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.spire.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" dict) | nindent 6 }}
+      containers:
+        - name: spire-server
+          image: {{ .Values.images.spireServer | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config
+            - /run/spire/config/server.conf
+          ports:
+            - name: grpc
+              containerPort: 8081
+              protocol: TCP
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: spire-config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: spire-data
+              mountPath: /run/spire/server/data
+            - name: spire-server-socket
+              mountPath: /run/spire/server-sockets
+          readinessProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+        - name: oidc-discovery-provider
+          image: {{ .Values.images.spireOidc | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config
+            - /run/spire/oidc/config/oidc-discovery-provider.conf
+          ports:
+            - name: oidc-http
+              containerPort: 8082
+              protocol: TCP
+            - name: oidc-health
+              containerPort: 8008
+              protocol: TCP
+          volumeMounts:
+            - name: oidc-config
+              mountPath: /run/spire/oidc/config
+              readOnly: true
+            - name: spire-server-socket
+              mountPath: /run/spire/server-sockets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8008
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 8008
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+        - name: spire-controller-manager
+          image: {{ .Values.images.spireControllerManager | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config
+            - /run/spire/controller-manager/config/spire-controller-manager-config.yaml
+          env:
+            - name: ENABLE_WEBHOOKS
+              value: "false"
+          ports:
+            - name: cm-health
+              containerPort: 8083
+              protocol: TCP
+          volumeMounts:
+            - name: controller-manager-config
+              mountPath: /run/spire/controller-manager/config
+              readOnly: true
+            - name: spire-server-socket
+              mountPath: /run/spire/server-sockets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8083
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8083
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: spire-config
+          configMap:
+            name: spire-server
+        - name: spire-server-socket
+          emptyDir: {}
+        - name: oidc-config
+          configMap:
+            name: spire-oidc-discovery-config
+        - name: controller-manager-config
+          configMap:
+            name: spire-controller-manager
+  volumeClaimTemplates:
+    - metadata:
+        name: spire-data
+        labels:
+          {{- include "alquimia.labels" . | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.spire.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.spire.storage }}
+{{- end }}

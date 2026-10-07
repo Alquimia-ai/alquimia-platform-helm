@@ -25,11 +25,23 @@ spec:
         app.kubernetes.io/part-of: alquimia
         role: worker
     spec:
+      {{- if .Values.runtime.zeroTrust.enabled }}
+      serviceAccountName: alquimia-runtime-sa
+      {{- end }}
       {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.runtime.nodeAffinity) | nindent 6 }}
       restartPolicy: Always
       imagePullSecrets:
         - name: {{ .Values.imagePullSecret.name }}
       terminationGracePeriodSeconds: 30
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        supplementalGroups:
+          - 1000
+        fsGroupChangePolicy: OnRootMismatch
+        {{- if not (include "alquimia.isOpenShift" .) }}
+        fsGroup: 1000
+        {{- end }}
       initContainers:
         {{- if and .Values.vault.enabled .Values.vault.autoUnseal }}
         {{- include "alquimia.waitVaultInit" . | nindent 8 }}
@@ -42,6 +54,7 @@ spec:
             - -c
             - |
               echo "Initializing registry..."
+              set +e
               rclone sync :s3:${S3_BUCKET}/registry /var/lib/alquimia/registry \
                 --s3-provider ${RCLONE_S3_PROVIDER} \
                 --s3-endpoint ${RCLONE_S3_ENDPOINT} \
@@ -49,7 +62,13 @@ spec:
                 --s3-secret-access-key ${RCLONE_S3_SECRET_ACCESS_KEY} \
                 --s3-env-auth=false \
                 -v
-              echo "Registry ready. Exit: $?"
+              rc=$?
+              set -e
+              if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+                echo "fetch-registry fallo: $rc"
+                exit "$rc"
+              fi
+              echo "Registry ready. Exit: $rc"
           env:
             - name: RCLONE_S3_PROVIDER
               valueFrom:
@@ -84,6 +103,8 @@ spec:
               drop:
                 - ALL
             allowPrivilegeEscalation: false
+          {{- include "alquimia.helperResources" . | nindent 10 }}
+        {{- include "alquimia.registryTrustInit" . | nindent 8 }}
       containers:
         - name: s3-sync
           image: {{ .Values.images.rclone | quote }}
@@ -138,6 +159,7 @@ spec:
               drop:
                 - ALL
             allowPrivilegeEscalation: false
+          {{- include "alquimia.helperResources" . | nindent 10 }}
         - name: alquimia-runtime
           image: {{ .Values.images.runtime | quote }}
           imagePullPolicy: Always
@@ -146,14 +168,35 @@ spec:
               value: worker
             - name: ALQUIMIA_REGISTRY_DIR
               value: /var/lib/alquimia/registry
+            - name: DOCKER_CONFIG
+              value: /var/docker-config
             - name: ALQUIMIA_EMBEDDINGS_CONFIG_DIR
               value: /var/lib/alquimia
             - name: HF_HOME
               value: /var/lib/alquimia/cache
+            - name: TMPDIR
+              value: /tmp
+            {{- include "alquimia.registryTrustEnv" . | nindent 12 }}
             - name: SPIFFE_ENABLED
-              value: "false"
+              value: {{ if .Values.runtime.zeroTrust.enabled }}"true"{{ else }}"false"{{ end }}
             - name: SPIFFE_SOCKET_PATH
-              value: /run/spire/sockets/agent.sock
+              value: {{ .Values.runtime.zeroTrust.socketPath | default "/run/spire/sockets/agent.sock" | quote }}
+            {{- if .Values.runtime.zeroTrust.enabled }}
+            - name: SPIFFE_TRUST_DOMAIN
+              value: {{ .Values.runtime.zeroTrust.trustDomain | quote }}
+            {{- if .Values.runtime.zeroTrust.delegated }}
+            - name: SPIFFE_DELEGATED_ENABLED
+              value: "true"
+            {{- end }}
+            - name: VAULT_AUTH_METHOD
+              value: kubernetes
+            - name: VAULT_K8S_ROLE
+              value: alquimia-runtime-worker
+            - name: VAULT_AUTH_ROLE
+              value: alquimia-runtime-worker
+            - name: VAULT_K8S_TOKEN_PATH
+              value: /var/run/secrets/vault/service-account/vault-token
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: alquimia-config
@@ -167,11 +210,21 @@ spec:
                 name: alquimia-s3
             - secretRef:
                 name: alquimia-auth
+            {{- if not .Values.runtime.zeroTrust.enabled }}
             - secretRef:
                 name: alquimia-vault
-            {{- if .Values.keycloak.runtimeAuth.enabled }}
+            {{- end }}
+            {{- if eq (include "alquimia.runtimeKeycloak" .) "true" }}
             - secretRef:
                 name: alquimia-keycloak
+            {{- end }}
+            {{- if eq (include "alquimia.helmSecrets" .) "true" }}
+            - secretRef:
+                name: alquimia-qdrant
+            {{- end }}
+            {{- if and .Values.runtime.secrets.encryptionKey .Values.runtime.secrets.registryKey }}
+            - secretRef:
+                name: alquimia-encryption
             {{- end }}
           ports:
             - name: http
@@ -181,8 +234,28 @@ spec:
             - name: registry-storage
               readOnly: true
               mountPath: /var/lib/alquimia/registry
+            - name: registry-config
+              readOnly: true
+              mountPath: /var/docker-config
             - name: cache-storage
               mountPath: /var/lib/alquimia/cache
+            - name: tmp
+              mountPath: /tmp
+            {{- include "alquimia.registryTrustMount" . | nindent 12 }}
+            {{- if .Values.runtime.cosign.publicKey }}
+            - name: cosign-key
+              mountPath: /etc/alquimia/cosign
+              readOnly: true
+            {{- end }}
+            {{- if .Values.runtime.zeroTrust.enabled }}
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            - name: vault-k8s-token
+              mountPath: /var/run/secrets/vault/service-account
+              readOnly: true
+            {{- end }}
+          {{- include "alquimia.runtimeContainerSecurity" . | nindent 10 }}
           resources:
             limits:
               cpu: "1"
@@ -219,6 +292,36 @@ spec:
       volumes:
         - name: registry-storage
           emptyDir: {}
+        - name: registry-config
+          secret:
+            secretName: alquimia-registry-config
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+            defaultMode: 420
         - name: cache-storage
           emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- include "alquimia.registryTrustVolumes" . | nindent 8 }}
+        {{- if .Values.runtime.cosign.publicKey }}
+        - name: cosign-key
+          configMap:
+            name: alquimia-cosign
+            defaultMode: 0444
+        {{- end }}
+        {{- if .Values.runtime.zeroTrust.enabled }}
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: vault-k8s-token
+          projected:
+            defaultMode: 288
+            sources:
+              - serviceAccountToken:
+                  path: vault-token
+                  expirationSeconds: 3600
+                  audience: vault
+        {{- end }}
 {{- end }}

@@ -1,0 +1,55 @@
+{{- if .Values.spire.enabled }}
+{{- $td := include "alquimia.spire.trustDomain" . }}
+{{- $spireNs := include "alquimia.spire.namespace" . }}
+{{- $appNs := include "alquimia.namespace" . }}
+{{- $cluster := .Values.spire.clusterName }}
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterStaticEntry
+metadata:
+  name: spire-agent-node-alias
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  parentID: {{ printf "spiffe://%s/spire/server" $td | quote }}
+  spiffeID: {{ printf "spiffe://%s/ns/%s/sa/spire-agent" $td $spireNs | quote }}
+  selectors:
+    - {{ printf "k8s_psat:cluster:%s" $cluster | quote }}
+    - {{ printf "k8s_psat:agent_ns:%s" $spireNs | quote }}
+    - k8s_psat:agent_sa:spire-agent
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterStaticEntry
+metadata:
+  name: alquimia-runtime-master
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  parentID: {{ printf "spiffe://%s/ns/%s/sa/spire-agent" $td $spireNs | quote }}
+  spiffeID: {{ printf "spiffe://%s/master" $td | quote }}
+  selectors:
+    - {{ printf "k8s:ns:%s" $appNs | quote }}
+    - k8s:sa:alquimia-runtime-sa
+    - k8s:pod-label:role:master
+  x509SVIDTTL: 1h
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterStaticEntry
+metadata:
+  name: alquimia-runtime-worker
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  parentID: {{ printf "spiffe://%s/ns/%s/sa/spire-agent" $td $spireNs | quote }}
+  spiffeID: {{ printf "spiffe://%s/worker" $td | quote }}
+  selectors:
+    - {{ printf "k8s:ns:%s" $appNs | quote }}
+    - k8s:sa:alquimia-runtime-sa
+    - k8s:pod-label:role:worker
+  x509SVIDTTL: 1h
+{{- end }}

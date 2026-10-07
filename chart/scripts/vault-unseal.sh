@@ -8,10 +8,17 @@ KEYS_SECRET="${KEYS_SECRET:-vault-keys}"
 TOKEN_SECRET="${TOKEN_SECRET:-alquimia-vault}"
 SHARES="${KEY_SHARES:-1}"
 THRESHOLD="${KEY_THRESHOLD:-1}"
-SA_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+SA_TOKEN_PATH=/var/run/secrets/kubernetes.io/serviceaccount/token
 CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
 K8S="https://kubernetes.default.svc/api/v1/namespaces/${NS}"
-AUTH_HDR="Authorization: Bearer ${SA_TOKEN}"
+SA_TOKEN=""
+AUTH_HDR=""
+
+refresh_sa_hdr() {
+  SA_TOKEN=$(cat "$SA_TOKEN_PATH")
+  AUTH_HDR="Authorization: Bearer ${SA_TOKEN}"
+}
+refresh_sa_hdr
 
 UNSEAL_KEY=""
 ROOT_TOKEN=""
@@ -86,8 +93,34 @@ save_keys() {
   token_post="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"${TOKEN_SECRET}\",\"namespace\":\"${NS}\"},\"type\":\"Opaque\",\"data\":{\"VAULT_TOKEN\":\"${tok_b64}\"}}"
   token_patch="{\"data\":{\"VAULT_TOKEN\":\"${tok_b64}\"}}"
   upsert_secret "$KEYS_SECRET" "$keys_post" "$keys_patch"
-  upsert_secret "$TOKEN_SECRET" "$token_post" "$token_patch"
-  log "keys persistidas en ${KEYS_SECRET}; token en ${TOKEN_SECRET}"
+  if [ "${WRITE_TOKEN_SECRET:-true}" = "true" ]; then
+    upsert_secret "$TOKEN_SECRET" "$token_post" "$token_patch"
+    log "keys persistidas en ${KEYS_SECRET}; token en ${TOKEN_SECRET}"
+  else
+    log "keys persistidas en ${KEYS_SECRET}"
+  fi
+}
+
+enable_kv() {
+  # KV v2 en secret/. Cubbyhole es por token: master y worker no comparten lo escrito ahí.
+  code=$(curl -sS -o /tmp/vault-kv-get.json -w "%{http_code}" \
+    -H "X-Vault-Token: ${ROOT_TOKEN}" \
+    "${VAULT_ADDR}/v1/sys/mounts/secret" || printf '000')
+  if [ "$code" = "200" ] && grep -q '"version":"2"' /tmp/vault-kv-get.json; then
+    return 0
+  fi
+  if [ "$code" = "200" ]; then
+    log "el mount secret existe y no es kv v2"
+    return 1
+  fi
+  code=$(vault_api POST /v1/sys/mounts/secret '{"type":"kv","options":{"version":"2"}}' /tmp/vault-kv.json)
+  if [ "$code" = "204" ] || [ "$code" = "200" ]; then
+    log "kv v2 montado en secret/"
+    return 0
+  fi
+  log "kv v2 fallo http=${code}"
+  cat /tmp/vault-kv.json 2>/dev/null || true
+  return 1
 }
 
 do_init() {
@@ -123,7 +156,190 @@ do_unseal() {
   log "unseal enviado"
 }
 
+json_escape() {
+  sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS=""} {if (NR>1) printf "\\n"; printf "%s", $0}'
+}
+
+vault_api() {
+  method="$1"
+  path="$2"
+  body="$3"
+  outfile="$4"
+  curl -sS -o "$outfile" -w "%{http_code}" -X "$method" \
+    -H "X-Vault-Token: ${ROOT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$body" \
+    "${VAULT_ADDR}${path}" || printf '000'
+}
+
+write_runtime_policies() {
+  cat > /tmp/policy-master.hcl <<'EOF'
+path "secret/data/global/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "secret/data/+/shared/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "secret/data/+/local/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "secret/metadata/global/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "secret/metadata/+/shared/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "secret/metadata/+/local/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "database/creds/alquimia-runtime-master" {
+  capabilities = ["read"]
+}
+path "sys/policies/acl/as-*" {
+  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+}
+# hvac list_policies() hace GET /v1/sys/policy. El glob as-* no cubre ese listado.
+path "sys/policy" {
+  capabilities = ["read"]
+}
+# hvac create_or_update_policy() hace PUT /v1/sys/policy/<nombre>. Escribir
+# políticas exige sudo.
+path "sys/policy/as-*" {
+  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+}
+path "auth/jwt/role" {
+  capabilities = ["list"]
+}
+path "auth/jwt/role/as-*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+path "auth/jwt/tidy/identity-grant" {
+  capabilities = ["update"]
+}
+path "sys/leases/revoke-prefix/batch" {
+  capabilities = ["update"]
+}
+EOF
+  cat > /tmp/policy-worker.hcl <<'EOF'
+path "secret/data/global/*" {
+  capabilities = ["read"]
+}
+path "secret/metadata/global/*" {
+  capabilities = ["list", "read"]
+}
+path "secret/data/+/*" {
+  capabilities = ["read"]
+}
+path "secret/metadata/+/*" {
+  capabilities = ["list", "read"]
+}
+path "database/creds/alquimia-runtime-worker" {
+  capabilities = ["read"]
+}
+EOF
+}
+
+apply_runtime_policies() {
+  write_runtime_policies
+  for name in alquimia-runtime-master alquimia-runtime-worker; do
+    if [ "$name" = "alquimia-runtime-master" ]; then
+      policy_json=$(json_escape < /tmp/policy-master.hcl)
+    else
+      policy_json=$(json_escape < /tmp/policy-worker.hcl)
+    fi
+    code=$(vault_api PUT "/v1/sys/policies/acl/${name}" \
+      "{\"policy\":\"${policy_json}\"}" \
+      /tmp/vault-policy.json)
+    if [ "$code" != "204" ] && [ "$code" != "200" ]; then
+      log "policy ${name} fallo http=${code}"
+      return 1
+    fi
+  done
+}
+
+refresh_k8s_reviewer() {
+  # Vault guarda una copia del JWT. El del pod rota; si no se vuelve a
+  # escribir, TokenReview falla y el login kubernetes responde permission denied.
+  if [ -z "$ROOT_TOKEN" ] && ! load_keys; then
+    log "kubernetes reviewer: no hay root token"
+    return 1
+  fi
+  sum=$(cksum "$SA_TOKEN_PATH" | awk '{print $1}')
+  if [ -f /tmp/k8s-reviewer.sum ] && [ "$(cat /tmp/k8s-reviewer.sum)" = "$sum" ]; then
+    return 0
+  fi
+  reviewer=$(cat "$SA_TOKEN_PATH")
+  ca_json=$(json_escape < "$CACERT")
+  jwt_json=$(printf '%s' "$reviewer" | json_escape)
+  code=$(vault_api POST /v1/auth/kubernetes/config \
+    "{\"kubernetes_host\":\"https://kubernetes.default.svc\",\"kubernetes_ca_cert\":\"${ca_json}\",\"token_reviewer_jwt\":\"${jwt_json}\"}" \
+    /tmp/vault-auth-config.json)
+  if [ "$code" != "204" ] && [ "$code" != "200" ]; then
+    log "kubernetes reviewer fallo http=${code}"
+    return 1
+  fi
+  printf '%s' "$sum" > /tmp/k8s-reviewer.sum
+  log "kubernetes reviewer actualizado"
+}
+
+configure_k8s_auth() {
+  if [ "${CONFIGURE_K8S_AUTH:-false}" != "true" ]; then
+    return 0
+  fi
+  if [ -f /tmp/k8s-auth.ok ]; then
+    refresh_k8s_reviewer || true
+    enable_kv || true
+    apply_runtime_policies || true
+    return 0
+  fi
+  if [ -z "$ROOT_TOKEN" ] && ! load_keys; then
+    log "kubernetes auth: no hay root token"
+    return 1
+  fi
+
+  code=$(vault_api POST /v1/sys/auth/kubernetes '{"type":"kubernetes"}' /tmp/vault-auth-enable.json)
+  if [ "$code" != "204" ] && [ "$code" != "200" ] && [ "$code" != "400" ]; then
+    log "kubernetes auth enable fallo http=${code}"
+    return 1
+  fi
+
+  enable_kv || return 1
+  refresh_k8s_reviewer || return 1
+
+  code=$(vault_api POST /v1/sys/auth/jwt '{"type":"jwt"}' /tmp/vault-jwt-enable.json)
+  if [ "$code" != "204" ] && [ "$code" != "200" ] && [ "$code" != "400" ]; then
+    log "jwt auth enable fallo http=${code}"
+    return 1
+  fi
+  if [ -n "${JWT_OIDC_DISCOVERY_URL:-}" ]; then
+    issuer_json=$(printf '%s' "$JWT_OIDC_DISCOVERY_URL" | json_escape)
+    code=$(vault_api POST /v1/auth/jwt/config \
+      "{\"oidc_discovery_url\":\"${issuer_json}\",\"bound_issuer\":\"${issuer_json}\",\"jwt_supported_algs\":[\"RS256\",\"ES256\",\"ES384\"]}" \
+      /tmp/vault-jwt-config.json)
+    if [ "$code" != "204" ] && [ "$code" != "200" ]; then
+      log "jwt auth config fallo http=${code}"
+      cat /tmp/vault-jwt-config.json 2>/dev/null || true
+      return 1
+    fi
+  fi
+
+  apply_runtime_policies || return 1
+  for name in alquimia-runtime-master alquimia-runtime-worker; do
+    code=$(vault_api POST "/v1/auth/kubernetes/role/${name}" \
+      "{\"bound_service_account_names\":\"alquimia-runtime-sa\",\"bound_service_account_namespaces\":\"${NS}\",\"policies\":\"${name}\",\"ttl\":\"1h\",\"audience\":\"vault\"}" \
+      /tmp/vault-role.json)
+    if [ "$code" != "204" ] && [ "$code" != "200" ]; then
+      log "role ${name} fallo http=${code}"
+      return 1
+    fi
+  done
+
+  touch /tmp/k8s-auth.ok
+  log "auth listo: kubernetes y jwt en ${NS}"
+}
+
 while true; do
+  refresh_sa_hdr
   wait_api
   code="$(health_code)"
   log "vault health=${code}"
@@ -131,6 +347,7 @@ while true; do
     200|429|472|473)
       if load_keys; then
         save_keys "$UNSEAL_KEY" "$ROOT_TOKEN"
+        configure_k8s_auth || true
       fi
       ;;
     501)

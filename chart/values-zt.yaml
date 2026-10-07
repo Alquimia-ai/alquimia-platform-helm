@@ -1,0 +1,60 @@
+# Perfil zero trust, sin Sealed Secrets.
+# Argo: valueFiles values.yaml y values-zt.yaml. No incluir values-sealed.yaml.
+# Helm: helm upgrade -f chart/values-zt.yaml
+#
+# Los Secret los crea el chart desde values (secrets.backend: helm).
+# Completar acá las contraseñas; values.yaml las deja vacías.
+
+secrets:
+  backend: helm
+
+runtime:
+  zeroTrust:
+    enabled: true
+  secrets:
+    kafkaSigningKey: ""
+    apiToken: ""
+    vaultToken: ""
+    s3:
+      accessKey: ""
+      secretKey: ""
+
+spire:
+  enabled: true
+
+keycloak:
+  runtimeAuth:
+    enabled: true
+    clientSecret: ""
+  auth:
+    username: ""
+    password: ""
+
+postgresql:
+  auth:
+    password: ""
+
+minio:
+  auth:
+    rootUser: ""
+    rootPassword: ""
+
+registry:
+  htpasswd: ""
+  dockerconfig:
+    username: ""
+    password: ""
+
+studio:
+  config:
+    NEXT_PUBLIC_ZERO_TRUST: "on"
+    NEXT_PUBLIC_TOOL_AUTHZ_ENABLED: "true"
+  secrets:
+    authLiteUsers: ""
+    assistantApiKey: ""
+    nextAuthSecret: ""
+
+imagePullSecret:
+  create: false
+  username: ""
+  password: ""

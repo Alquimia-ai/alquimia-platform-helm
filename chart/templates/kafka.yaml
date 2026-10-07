@@ -40,7 +40,11 @@ spec:
         app: kafka
     spec:
       {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.kafka.nodeAffinity) | nindent 6 }}
-      securityContext: {}
+      securityContext:
+        fsGroupChangePolicy: OnRootMismatch
+        {{- if not (include "alquimia.isOpenShift" .) }}
+        fsGroup: 1000
+        {{- end }}
       initContainers:
         - name: prepare-config
           image: {{ .Values.images.kafka | quote }}

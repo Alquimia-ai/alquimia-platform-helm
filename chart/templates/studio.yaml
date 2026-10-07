@@ -35,11 +35,20 @@ data:
   AUTH_STRATEGY: keycloak
   KEYCLOAK_ISSUER: {{ include "alquimia.keycloakIssuer" . | quote }}
   KEYCLOAK_CLIENT_ID: {{ .Values.keycloak.studioAuth.clientId | quote }}
+  AUTH_KEYCLOAK_ISSUER: {{ include "alquimia.keycloakIssuer" . | quote }}
+  AUTH_KEYCLOAK_ID: {{ .Values.keycloak.studioAuth.clientId | quote }}
   {{- else }}
   AUTH_STRATEGY: {{ .Values.studio.config.AUTH_STRATEGY | quote }}
   {{- end }}
   ASSISTANT_BASEURL: {{ printf "http://alquimia-runtime-master.%s.svc.cluster.local:8080" (include "alquimia.namespace" .) | quote }}
   NEXT_PUBLIC_DEFAULT_NAMESPACE: {{ .Values.studio.config.NEXT_PUBLIC_DEFAULT_NAMESPACE | quote }}
+  NEXT_PUBLIC_ZERO_TRUST: {{ .Values.studio.config.NEXT_PUBLIC_ZERO_TRUST | quote }}
+  NEXT_PUBLIC_TOOL_AUTHZ_ENABLED: {{ .Values.studio.config.NEXT_PUBLIC_TOOL_AUTHZ_ENABLED | quote }}
+  RUNTIME_USER_IDENTITY: {{ .Values.studio.config.RUNTIME_USER_IDENTITY | quote }}
+  RUNTIME_TOKEN_AUDIENCE: {{ .Values.studio.config.RUNTIME_TOKEN_AUDIENCE | quote }}
+  EXTERNAL_REGISTRY_URL: {{ .Values.studio.config.EXTERNAL_REGISTRY_URL | quote }}
+  EXTERNAL_REGISTRY_AGENTS_PROJECT: {{ .Values.studio.config.EXTERNAL_REGISTRY_AGENTS_PROJECT | quote }}
+  EXTERNAL_REGISTRY_BRAINS_PROJECT: {{ .Values.studio.config.EXTERNAL_REGISTRY_BRAINS_PROJECT | quote }}
   {{- if .Values.otel.enabled }}
   OTEL_SDK_DISABLED: "false"
   OTEL_ALQUIMIA_SERVICE_NAME: alquimia-studio
@@ -70,11 +79,14 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1"
 type: Opaque
 stringData:
+  {{- if not .Values.keycloak.studioAuth.enabled }}
   AUTH_LITE_USERS: {{ .Values.studio.secrets.authLiteUsers | quote }}
+  {{- end }}
   ALQUIMIA_ASSISTANT_API_KEY: {{ .Values.studio.secrets.assistantApiKey | quote }}
   NEXTAUTH_SECRET: {{ .Values.studio.secrets.nextAuthSecret | quote }}
   {{- if .Values.keycloak.studioAuth.enabled }}
   KEYCLOAK_CLIENT_SECRET: {{ .Values.keycloak.studioAuth.clientSecret | quote }}
+  AUTH_KEYCLOAK_SECRET: {{ .Values.keycloak.studioAuth.clientSecret | quote }}
   {{- end }}
 {{- end }}
 ---
@@ -101,8 +113,10 @@ spec:
         app.kubernetes.io/part-of: alquimia
       annotations:
         checksum/studio-host: {{ include "alquimia.studioHost" . | sha256sum }}
+        checksum/studio-config: {{ .Values.studio.config | toYaml | sha256sum }}
     spec:
       {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.studio.nodeAffinity) | nindent 6 }}
+      enableServiceLinks: false
       securityContext: {}
       imagePullSecrets:
         - name: {{ .Values.imagePullSecret.name }}
@@ -163,6 +177,42 @@ spec:
       port: 3000
       targetPort: http
       protocol: TCP
+{{- $exposure := .Values.studio.exposure | default "route" }}
+{{- $host := include "alquimia.studioHost" . | trim }}
+{{- if eq $exposure "ingress" }}
+{{- if not $host }}
+{{- fail "studio.exposure ingress requiere studio.host" }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: alquimia-studio
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: alquimia-studio
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    {{- with .Values.studio.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.studio.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.studio.ingress.path | default "/" | quote }}
+            pathType: {{ .Values.studio.ingress.pathType | default "Prefix" }}
+            backend:
+              service:
+                name: alquimia-studio
+                port:
+                  name: http
+{{- else if eq $exposure "route" }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -176,8 +226,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "2"
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
-  {{- with (include "alquimia.studioHost" . | trim) }}
-  host: {{ . | quote }}
+  {{- if $host }}
+  host: {{ $host | quote }}
   {{- end }}
   to:
     kind: Service
@@ -189,4 +239,7 @@ spec:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
   wildcardPolicy: None
+{{- else if ne $exposure "cluster" }}
+{{- fail "studio.exposure tiene que ser cluster, ingress o route" }}
+{{- end }}
 {{- end }}

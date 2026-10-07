@@ -2,3 +2,4 @@ chart/secrets/local/
 sealed-cert.pem
 *.pem
 .DS_Store
+extra/

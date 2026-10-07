@@ -56,6 +56,40 @@ subjects:
   - kind: ServiceAccount
     name: {{ $saName }}
     namespace: {{ include "alquimia.namespace" . }}
+{{- if .Values.runtime.zeroTrust.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alquimia-vault-tokenreview
+  labels:
+    app: vault-unsealer
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alquimia-vault-tokenreview
+  labels:
+    app: vault-unsealer
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alquimia-vault-tokenreview
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ include "alquimia.namespace" . }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -90,6 +124,8 @@ spec:
     metadata:
       labels:
         app: vault-unsealer
+      annotations:
+        checksum/unseal: {{ .Files.Get "scripts/vault-unseal.sh" | sha256sum }}
     spec:
       {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.vault.nodeAffinity) | nindent 6 }}
       serviceAccountName: {{ $saName }}
@@ -117,6 +153,14 @@ spec:
               value: {{ .Values.vault.keyShares | quote }}
             - name: KEY_THRESHOLD
               value: {{ .Values.vault.keyThreshold | quote }}
+            {{- if .Values.runtime.zeroTrust.enabled }}
+            - name: CONFIGURE_K8S_AUTH
+              value: "true"
+            - name: WRITE_TOKEN_SECRET
+              value: "false"
+            - name: JWT_OIDC_DISCOVERY_URL
+              value: {{ printf "http://spire-oidc-discovery-provider.%s.svc.cluster.local:8080" (include "alquimia.spire.namespace" .) | quote }}
+            {{- end }}
           volumeMounts:
             - name: scripts
               mountPath: /scripts

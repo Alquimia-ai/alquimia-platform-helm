@@ -1,4 +1,5 @@
-{{- if .Values.registry.enabled }}
+{{- if and .Values.registry.enabled (eq (include "alquimia.registryMode" .) "local") }}
+{{- $registryCaSum := "" }}
 {{- if eq (include "alquimia.helmSecrets" .) "true" }}
 apiVersion: v1
 kind: Secret
@@ -14,23 +15,42 @@ type: Opaque
 stringData:
   auth.htpasswd: {{ .Values.registry.htpasswd | quote }}
 ---
-{{- if and .Values.registry.dockerconfig.username .Values.registry.dockerconfig.password }}
+{{- end }}
+{{- if eq (include "alquimia.registryTLS" .) "true" }}
+{{- $ns := include "alquimia.namespace" . }}
+{{- $existing := lookup "v1" "Secret" $ns "oras-registry-tls" }}
 apiVersion: v1
 kind: Secret
 metadata:
-  name: alquimia-registry-config
-  namespace: {{ include "alquimia.namespace" . }}
+  name: oras-registry-tls
+  namespace: {{ $ns }}
   labels:
     app: oras-registry
     {{- include "alquimia.labels" . | nindent 4 }}
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
-type: kubernetes.io/dockerconfigjson
-stringData:
-  .dockerconfigjson: |
-    {"auths":{"oras-registry.{{ include "alquimia.namespace" . }}.svc.cluster.local:5000":{"username":{{ .Values.registry.dockerconfig.username | quote }},"password":{{ .Values.registry.dockerconfig.password | quote }}}}}
----
+type: kubernetes.io/tls
+{{- $tlsCrt := "" }}
+{{- $tlsKey := "" }}
+{{- $caCrt := "" }}
+{{- if and $existing $existing.data (index $existing.data "ca.crt") (index $existing.data "tls.crt") (index $existing.data "tls.key") }}
+{{- $tlsCrt = index $existing.data "tls.crt" }}
+{{- $tlsKey = index $existing.data "tls.key" }}
+{{- $caCrt = index $existing.data "ca.crt" }}
+{{- else }}
+{{- $dns := list (printf "oras-registry.%s.svc.cluster.local" $ns) (printf "oras-registry.%s.svc" $ns) "oras-registry" }}
+{{- $ca := genCA "alquimia-oras" 3650 }}
+{{- $cert := genSignedCert "oras-registry" nil $dns 3650 $ca }}
+{{- $tlsCrt = $cert.Cert | b64enc }}
+{{- $tlsKey = $cert.Key | b64enc }}
+{{- $caCrt = $ca.Cert | b64enc }}
 {{- end }}
+{{- $registryCaSum = $caCrt | sha256sum }}
+data:
+  tls.crt: {{ $tlsCrt }}
+  tls.key: {{ $tlsKey }}
+  ca.crt: {{ $caCrt }}
+---
 {{- end }}
 apiVersion: v1
 kind: Service
@@ -71,6 +91,10 @@ spec:
     metadata:
       labels:
         app: oras-registry
+      {{- if $registryCaSum }}
+      annotations:
+        checksum/registry-ca: {{ $registryCaSum | quote }}
+      {{- end }}
     spec:
       {{- include "alquimia.nodeAffinity" (dict "Values" .Values "local" .Values.registry.nodeAffinity) | nindent 6 }}
       containers:
@@ -89,12 +113,23 @@ spec:
               value: ORAS Registry
             - name: REGISTRY_AUTH_HTPASSWD_PATH
               value: /auth/auth.htpasswd
+            {{- if eq (include "alquimia.registryTLS" .) "true" }}
+            - name: REGISTRY_HTTP_TLS_CERTIFICATE
+              value: /certs/tls.crt
+            - name: REGISTRY_HTTP_TLS_KEY
+              value: /certs/tls.key
+            {{- end }}
           volumeMounts:
             - name: registry-data
               mountPath: /var/lib/registry
             - name: registry-auth
               mountPath: /auth
               readOnly: true
+            {{- if eq (include "alquimia.registryTLS" .) "true" }}
+            - name: registry-tls
+              mountPath: /certs
+              readOnly: true
+            {{- end }}
           readinessProbe:
             tcpSocket:
               port: 5000
@@ -116,6 +151,11 @@ spec:
         - name: registry-auth
           secret:
             secretName: oras-registry-auth
+        {{- if eq (include "alquimia.registryTLS" .) "true" }}
+        - name: registry-tls
+          secret:
+            secretName: oras-registry-tls
+        {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: registry-data
@@ -125,4 +165,25 @@ spec:
         resources:
           requests:
             storage: {{ .Values.registry.storage }}
+{{- end }}
+{{- if and (eq (include "alquimia.helmSecrets" .) "true") .Values.registry.dockerconfig.username .Values.registry.dockerconfig.password }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-registry-config
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: oras-registry
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: kubernetes.io/dockerconfigjson
+stringData:
+  {{- $auths := dict (include "alquimia.registryHost" .) (dict "username" .Values.registry.dockerconfig.username "password" .Values.registry.dockerconfig.password) }}
+  {{- $pub := .Values.registry.public | default dict }}
+  {{- if and $pub.host $pub.username $pub.password }}
+  {{- $auths = merge $auths (dict $pub.host (dict "username" $pub.username "password" $pub.password)) }}
+  {{- end }}
+  .dockerconfigjson: {{ dict "auths" $auths | toJson | quote }}
 {{- end }}

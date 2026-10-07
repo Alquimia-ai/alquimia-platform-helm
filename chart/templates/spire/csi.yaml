@@ -1,0 +1,102 @@
+{{- if .Values.spire.enabled }}
+{{- $ns := include "alquimia.spire.namespace" . }}
+{{- $kubelet := .Values.spire.kubeletRoot }}
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: csi.spiffe.io
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+    security.openshift.io/csi-ephemeral-volume-profile: restricted
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  podInfoOnMount: true
+  fsGroupPolicy: File
+  volumeLifecycleModes:
+    - Ephemeral
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spiffe-csi-driver
+  namespace: {{ $ns }}
+  labels:
+    app: spiffe-csi-driver
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  selector:
+    matchLabels:
+      app: spiffe-csi-driver
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: spiffe-csi-driver
+        {{- include "alquimia.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: spiffe-csi-driver
+      {{- with .Values.spire.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.spire.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: spiffe-csi-driver
+          image: {{ .Values.images.spireCsiDriver | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - -workload-api-socket-dir=/spire-agent-socket
+            - -plugin-name=csi.spiffe.io
+            - -csi-socket-path=/spiffe-csi/csi.sock
+          env:
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: spire-agent-socket-dir
+              mountPath: /spire-agent-socket
+              readOnly: true
+            - name: plugin-mount
+              mountPath: /spiffe-csi
+            - name: pods-mount-dir
+              mountPath: /var/lib/kubelet/pods
+              mountPropagation: Bidirectional
+          securityContext:
+            privileged: true
+        - name: node-driver-registrar
+          image: {{ .Values.images.spireCsiRegistrar | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - -csi-address=/spiffe-csi/csi.sock
+            - -kubelet-registration-path={{ $kubelet }}/plugins/csi.spiffe.io/csi.sock
+          volumeMounts:
+            - name: plugin-mount
+              mountPath: /spiffe-csi
+            - name: registration-dir
+              mountPath: /registration
+      volumes:
+        - name: spire-agent-socket-dir
+          hostPath:
+            path: {{ .Values.spire.socketHostPath | quote }}
+            type: DirectoryOrCreate
+        - name: plugin-mount
+          hostPath:
+            path: {{ printf "%s/plugins/csi.spiffe.io" $kubelet | quote }}
+            type: DirectoryOrCreate
+        - name: registration-dir
+          hostPath:
+            path: {{ printf "%s/plugins_registry" $kubelet | quote }}
+            type: Directory
+        - name: pods-mount-dir
+          hostPath:
+            path: {{ printf "%s/pods" $kubelet | quote }}
+            type: Directory
+{{- end }}

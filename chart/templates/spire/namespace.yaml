@@ -1,0 +1,17 @@
+{{- if .Values.spire.enabled }}
+{{- $p := .Values.spire.platform | default "auto" }}
+{{- if not (has $p (list "auto" "kubernetes" "openshift")) }}
+{{- fail "spire.platform tiene que ser auto, kubernetes u openshift" }}
+{{- end }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "alquimia.spire.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+{{- end }}

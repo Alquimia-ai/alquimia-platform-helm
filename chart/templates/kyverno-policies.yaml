@@ -1,0 +1,197 @@
+{{- if .Values.kyverno.enabled }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-alquimia-registries
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    policies.kyverno.io/title: Restrict container registries
+    policies.kyverno.io/category: Zero Trust
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Only images from the curated registry allow-list may be scheduled in the
+      platform namespace. Update the allow-list when an overlay switches
+      to an internal mirror.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: allowed-registries
+      match:
+        resources:
+          kinds:
+            - Pod
+          namespaces:
+            - {{ include "alquimia.namespace" . }}
+      validate:
+        message: |
+          Container image must come from an approved registry/repository:
+          docker.io/alquimiaai/*, docker.io/rclone/*, registry.access.redhat.com/*,
+          ghcr.io/*, gcr.io/*, quay.io/*.
+        pattern:
+          spec:
+            =(initContainers):
+              - image: "docker.io/alquimiaai/* | docker.io/rclone/* | registry.access.redhat.com/* | ghcr.io/* | gcr.io/* | quay.io/*"
+            containers:
+              - image: "docker.io/alquimiaai/* | docker.io/rclone/* | registry.access.redhat.com/* | ghcr.io/* | gcr.io/* | quay.io/*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-alquimia-pod-security
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    policies.kyverno.io/title: Require hardened container security context
+    policies.kyverno.io/category: Zero Trust
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Enforce non-root, dropped capabilities, no privilege escalation,
+      read-only root filesystem, RuntimeDefault seccomp, and explicit UID/GID
+      for every container in the platform namespace.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: pod-run-as-non-root
+      match:
+        resources:
+          kinds:
+            - Pod
+          namespaces:
+            - {{ include "alquimia.namespace" . }}
+      validate:
+        message: "Pod spec must declare runAsNonRoot: true."
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+    - name: container-security-context
+      match:
+        resources:
+          kinds:
+            - Pod
+          namespaces:
+            - {{ include "alquimia.namespace" . }}
+      validate:
+        message: |
+          Every container must set runAsNonRoot, runAsUser, runAsGroup,
+          allowPrivilegeEscalation: false, readOnlyRootFilesystem: true,
+          capabilities.drop=[ALL], and seccompProfile.type=RuntimeDefault.
+        pattern:
+          spec:
+            =(initContainers):
+              - securityContext:
+                  runAsNonRoot: true
+                  runAsUser: "?*"
+                  runAsGroup: "?*"
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop: ["ALL"]
+                  seccompProfile:
+                    type: "RuntimeDefault"
+            containers:
+              - securityContext:
+                  runAsNonRoot: true
+                  runAsUser: "?*"
+                  runAsGroup: "?*"
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop: ["ALL"]
+                  seccompProfile:
+                    type: "RuntimeDefault"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-alquimia-resource-limits
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    policies.kyverno.io/title: Require CPU and memory resource limits
+    policies.kyverno.io/category: Zero Trust
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Every container in the platform namespace must declare CPU and
+      memory requests and limits.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: container-resource-limits
+      match:
+        resources:
+          kinds:
+            - Pod
+          namespaces:
+            - {{ include "alquimia.namespace" . }}
+      validate:
+        message: "Every container must set CPU and memory requests and limits."
+        pattern:
+          spec:
+            =(initContainers):
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-alquimia-runtime-images
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    policies.kyverno.io/title: Verify Alquimia runtime image signatures
+    policies.kyverno.io/category: Zero Trust
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Require a cosign keyless signature for every alquimiaai/runtime image
+      scheduled in the platform namespace. The identity must match the
+      GitHub Actions workflow that builds and pushes the runtime image.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  webhookTimeoutSeconds: 30
+  failurePolicy: Fail
+  rules:
+    - name: verify-runtime-signature
+      match:
+        resources:
+          kinds:
+            - Pod
+          namespaces:
+            - {{ include "alquimia.namespace" . }}
+      verifyImages:
+        - imageReferences:
+            - "docker.io/alquimiaai/runtime:*"
+            - "docker.io/alquimiaai/runtime@sha256:*"
+          required: true
+          mutateDigest: true
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    issuer: "https://token.actions.githubusercontent.com"
+                    subjectRegExp: "^https://github.com/Alquimia-ai/alquimia-runtime/.github/workflows/docker-build.yaml@.*"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+{{- end }}

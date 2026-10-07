@@ -1,0 +1,178 @@
+{{- if .Values.spire.enabled }}
+{{- $ns := include "alquimia.spire.namespace" . }}
+{{- $td := include "alquimia.spire.trustDomain" . }}
+{{- $cluster := .Values.spire.clusterName }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-server
+  namespace: {{ $ns }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+data:
+  server.conf: |
+    server {
+      trust_domain = {{ $td | quote }}
+      data_dir = "/run/spire/server/data"
+      log_level = "INFO"
+      ca_key_type = "ec-p256"
+      default_x509_svid_ttl = "1h"
+      default_jwt_svid_ttl = "5m"
+      ca_ttl = "24h"
+      socket_path = "/run/spire/server-sockets/api.sock"
+    }
+    plugins {
+      DataStore "sql" {
+        plugin_data {
+          database_type = "sqlite3"
+          connection_string = "/run/spire/server/data/datastore.sqlite3"
+        }
+      }
+      NodeAttestor "k8s_psat" {
+        plugin_data {
+          clusters = {
+            {{ $cluster | quote }} = {
+              service_account_allow_list = [{{ printf "%s:spire-agent" $ns | quote }}]
+            }
+          }
+        }
+      }
+      KeyManager "memory" {
+        plugin_data {}
+      }
+      Notifier "k8sbundle" {
+        plugin_data {}
+      }
+    }
+    health_checks {
+      listener_enabled = true
+      bind_address = "0.0.0.0"
+      bind_port = "8080"
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-bundle
+  namespace: {{ $ns }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-agent
+  namespace: {{ $ns }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+data:
+  agent.conf: |
+    agent {
+      trust_domain = {{ $td | quote }}
+      server_address = "spire-server"
+      server_port = "8081"
+      data_dir = "/run/spire/agent/data"
+      log_level = "INFO"
+      socket_path = {{ include "alquimia.spire.socketPath" . | quote }}
+      trust_bundle_path = "/run/spire/bundle/bundle.crt"
+      authorized_delegates = [{{ printf "spiffe://%s/worker" $td | quote }}]
+    }
+    plugins {
+      NodeAttestor "k8s_psat" {
+        plugin_data {
+          cluster = {{ $cluster | quote }}
+          token_path = "/var/run/secrets/tokens/spire-agent"
+        }
+      }
+      KeyManager "memory" {
+        plugin_data {}
+      }
+      WorkloadAttestor "k8s" {
+        plugin_data {
+          enabled = true
+          verbose = false
+          use_new_container_locator = true
+          {{- if eq (include "alquimia.spire.useKubeletCA" .) "true" }}
+          kubelet_ca_path = "/run/spire/kubelet-ca/ca.crt"
+          {{- end }}
+        }
+      }
+    }
+    health_checks {
+      listener_enabled = true
+      bind_address = "0.0.0.0"
+      bind_port = "8080"
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-controller-manager
+  namespace: {{ $ns }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+data:
+  spire-controller-manager-config.yaml: |
+    apiVersion: spire.spiffe.io/v1alpha1
+    kind: ControllerManagerConfig
+    health:
+      healthProbeBindAddress: :8083
+    metrics:
+      bindAddress: 127.0.0.1:8084
+    webhook:
+      port: 9443
+    leaderElection:
+      leaderElect: false
+    trustDomain: {{ $td }}
+    clusterName: {{ $cluster }}
+    spireServerSocketPath: /run/spire/server-sockets/api.sock
+    validatingWebhookConfigurationName: spire-controller-manager-webhook
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-oidc-discovery-config
+  namespace: {{ $ns }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+data:
+  oidc-discovery-provider.conf: |
+    health_checks {
+      bind_address = "0.0.0.0"
+      bind_port = "8008"
+      ready_path = "/ready"
+    }
+    trust_domain = {{ $td | quote }}
+    domains = [{{ printf "spire-oidc-discovery-provider.%s.svc.cluster.local" $ns | quote }}]
+    allow_insecure_scheme = true
+    insecure_addr = "0.0.0.0:8082"
+    server_api {
+      address = "unix:///run/spire/server-sockets/api.sock"
+    }
+{{- $bundle := include "alquimia.spire.kubeletCABundle" . }}
+{{- if and (eq (include "alquimia.spire.useKubeletCA" .) "true") $bundle }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-agent-kubelet-ca
+  namespace: {{ $ns }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+data:
+  ca.crt: |
+{{ $bundle | indent 4 }}
+{{- end }}
+{{- end }}

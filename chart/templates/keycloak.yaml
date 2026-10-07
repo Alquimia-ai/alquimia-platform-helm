@@ -8,8 +8,8 @@
 {{- fail "keycloak.existing.service requiere keycloak.existing.namespace" }}
 {{- end }}
 {{- $kcUrl := include "alquimia.keycloakUrl" . | trim }}
-{{- if and (or $runtimeAuth.enabled $studioAuth.enabled) (not $kcUrl) }}
-{{- fail "keycloak.runtimeAuth o keycloak.studioAuth requieren keycloak.enabled, o existing.url / existing.service" }}
+{{- if and (or $runtimeAuth.enabled $studioAuth.enabled .Values.runtime.zeroTrust.enabled) (not $kcUrl) }}
+{{- fail "keycloak.runtimeAuth, keycloak.studioAuth o runtime.zeroTrust.enabled requieren keycloak.enabled, o existing.url / existing.service" }}
 {{- end }}
 {{- if and $studioAuth.enabled (not .Values.studio.enabled) }}
 {{- fail "keycloak.studioAuth.enabled requiere studio.enabled" }}

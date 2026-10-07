@@ -1,9 +1,11 @@
 # En Argo CD se pueden sobreescribir en spec.source.helm.values / valueFiles.
+# Este archivo es el perfil sin zero trust (Sealed Secrets).
+# El perfil con ZT, sin Sealed Secrets, es values-zt.yaml.
 
 namespace: alquimia-platform
-# Si el Project/Namespace ya existe, el chart no lo recrea (lookup).
-# true: lo crea solo cuando falta. false: nunca lo gestiona el chart.
-createNamespace: true
+# El chart no crea este namespace. Si lo mete en el release, el upgrade
+# siguiente lo borra (el secret de Helm vive adentro) y el namespace queda
+# imposible de borrar. Crearlo con: helm --create-namespace, o que ya exista.
 
 # sealed: Argo CD aplica SealedSecret (values-sealed.yaml). Helm no crea Secrets.
 # helm: crea Secrets desde values (solo local, no GitOps).
@@ -32,17 +34,27 @@ imagePullSecret:
   password: ""
 
 images:
-  minio: quay.io/minio/minio:RELEASE.2023-10-24T04-42-36Z
+  # quay.io/minio/minio ya no permite pull anónimo. pgsty/minio es el build
+  # de la comunidad, mismo server /data y MINIO_ROOT_*.
+  minio: docker.io/pgsty/minio:RELEASE.2026-08-04T00-00-00Z
   postgres: docker.io/library/postgres:16
   redis: redis:7
-  registry: ghcr.io/oras-project/registry:latest
-  rclone: rclone/rclone:latest
-  runtime: alquimiaai/runtime:0.5.0
-  studio: alquimiaai/studio:latest-20260714-2037
+  qdrant: docker.io/qdrant/qdrant:v1.19.2
+  registry: ghcr.io/oras-project/registry:v1.0.0-rc.4
+  rclone: rclone/rclone:1.75.1
+  runtime: alquimiaai/runtime:0.5.4
+  studio: alquimiaai/studio:latest-20261002-2112
   vault: docker.io/hashicorp/vault:1.21.2
   kafka: apache/kafka:3.8.0
   curl: curlimages/curl:8.11.1
   keycloak: quay.io/keycloak/keycloak:26.7.3
+  busybox: busybox:1.36
+  spireServer: ghcr.io/spiffe/spire-server:1.9.6
+  spireAgent: ghcr.io/spiffe/spire-agent:1.9.6
+  spireOidc: ghcr.io/spiffe/oidc-discovery-provider:1.9.6
+  spireControllerManager: ghcr.io/spiffe/spire-controller-manager:0.6.0
+  spireCsiDriver: ghcr.io/spiffe/spiffe-csi-driver:0.2.4
+  spireCsiRegistrar: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.10.0
 
 minio:
   enabled: true
@@ -76,9 +88,31 @@ redis:
   enabled: true
   storage: 25Gi
 
+# Obligatorio. El runtime usa Qdrant como knowledge provider y, si no hay
+# servicio, cae en http://localhost:6333.
+qdrant:
+  enabled: true
+  storage: 10Gi
+
 registry:
   enabled: true
   storage: 10Gi
+  # local: despliega oras-registry y es el registry por defecto del runtime.
+  # remote: no lo despliega; el runtime usa solo host.
+  mode: local
+  host: ""
+  # Con tls el registry local habla HTTPS. El chart guarda la CA y el runtime
+  # la confía, así ORAS_INSECURE queda en false y también puede hablar con
+  # public.host por HTTPS.
+  tls: true
+  plainHttp: false
+  insecure: false
+  public:
+    # El cliente lo reemplaza. Ejemplo: registry.acme.example
+    host: registry.acme.example
+    # Harbor pide login aunque el proyecto sea público. Vacío: sin credencial.
+    username: ""
+    password: ""
   htpasswd: ""
   dockerconfig:
     username: ""
@@ -108,28 +142,91 @@ otel:
   metricsPath: /v1/metrics
   logsPath: /v1/logs
   intervalMillis: "5000"
-  # Solo runtime. Vacío: no se setea OTEL_EXCLUDED_ATTRIBUTES.
-  excludedAttributes: ""
+  # PII que no debe salir en telemetría, aunque el collector todavía no esté.
+  excludedAttributes: session_id,channel_id,user_id
 
 runtime:
   enabled: true
   masterReplicas: 1
   workerReplicas: 3
   registryStorage: 10Gi
+  # cluster: solo el Service (svc.cluster.local). ingress: Ingress. route: Route de OpenShift.
+  exposure: cluster
+  host: ""
+  ingress:
+    className: ""
+    path: /
+    pathType: Prefix
+    annotations: {}
   config:
     DEBUG: "False"
     IS_ALLOWED_CREDENTIALS: "False"
-    ORAS_INSECURE: "true"
-    ORAS_PLAIN_HTTP: "true"
-    ALQUIMIA_OCI_DEV_MODE: "true"
+    # Con registry.tls el chart fuerza HTTPS y verifica la CA local.
+    # Estos valores solo aplican si el registry local queda en HTTP.
+    ORAS_INSECURE: "false"
+    ORAS_PLAIN_HTTP: "false"
+    ALQUIMIA_OCI_DEV_MODE: "false"
+    ALQUIMIA_OCI_REFERRERS_FALLBACK: error
+    ALQUIMIA_OCI_SUBPROCESS_TIMEOUT: "300"
+    ALQUIMIA_OCI_COSIGN_HOME: /tmp/cosign
+    ALQUIMIA_OCI_COSIGN_TLOG_UPLOAD: "false"
     ALQUIMIA_REGISTRY_DIR: /var/lib/alquimia/registry
     ALQUIMIA_REGISTRY_SECRET_RESOLVER: vault
-    VAULT_MOUNT_POINT: cubbyhole
+    ALQUIMIA_REGISTRY_REHYDRATE_ENABLED: "true"
+    ALQUIMIA_REGISTRY_REHYDRATE_BUNDLED_BLOBS: "false"
+    VAULT_MOUNT_POINT: secret
+    VAULT_TLS: "false"
+    DB_POOL_SIZE: "10"
+    DB_POOL_OVERFLOW: "10"
+    DB_POOL_PRE_PING: "true"
+    DB_POOL_RECYCLE: "1800"
+    DB_CREATE_ON_STARTUP: "false"
+    TOOL_AUTHZ_ENABLED: "true"
+    TOOL_AUTHZ_DEFAULT_DENY: "false"
+    KNOWLEDGE_AUTHZ_ENABLED: "true"
+    KNOWLEDGE_AUTHZ_DEFAULT_DENY: "false"
     KAFKA_MAX_REQUEST_SIZE: "10485760"
+  # false: runtime con API_TOKEN, Kafka en claro y OCI en modo dev.
+  # true: perfil de alquimia-runtime-develop (Keycloak, SPIFFE, firma OCI,
+  # TLS_ENFORCE). El socket CSI lo monta el runtime; el server y el agent
+  # los instala spire.enabled (o tienen que existir ya). El Kafka de este
+  # chart no tiene TLS: kafkaSecurityProtocol queda PLAINTEXT salvo que
+  # apuntes a un broker con auth.
+  zeroTrust:
+    enabled: false
+    acceptedAudiences: alquimia-runtime
+    roleSourceClients: alquimia-runtime,alquimia-studio-service,alquimia-ci
+    # Dominio SPIFFE del cliente. Ejemplo: acme.example
+    trustDomain: acme.example
+    socketPath: /run/spire/sockets/agent.sock
+    delegated: true
+    agentspaceProvisioning: true
+    provisioningIntervalSeconds: "300"
+    provisioningNamespace: spire
+    vaultJwtAuthPath: jwt
+    signaturePolicy: required
+    tlsEnforce: false
+    # Solo aplican si registry.tls es false. Con tls el runtime confía la CA
+    # local y estos flags quedan en false.
+    orasPlainHttp: "false"
+    orasInsecure: "false"
+    kafkaSecurityProtocol: PLAINTEXT
+  # PEM de la clave pública de cosign de la org. Vacío: no se monta y los
+  # pulls con signaturePolicy=required siguen sin poder verificar.
+  cosign:
+    publicKey: ""
   secrets:
     kafkaSigningKey: ""
     apiToken: ""
     vaultToken: ""
+    # Vacío: no se crea el Secret. Hay que generarlo una vez y respaldarlo
+    # fuera del cluster; sin la clave no se lee lo que ya se cifró.
+    encryptionKey: ""
+    encryptionKeyId: ""
+    registryKey: ""
+    registryKeyId: ""
+    # Tiene que coincidir con lo que firman los channel connectors.
+    channelNotificationSecret: ""
     s3:
       accessKey: ""
       secretKey: ""
@@ -138,6 +235,33 @@ runtime:
       provider: Minio
       region: us-east-1
       secure: "false"
+
+# false: no instala SPIRE. true: server, agent, CSI, OIDC discovery,
+# controller-manager y las ClusterStaticEntry de master/worker.
+# Namespace aparte (privilegiado). El runtime sigue en el namespace del chart
+# y usa el socket por CSI, así puede quedar en restricted.
+# platform auto: en un helm install contra OpenShift copia la CA del kubelet;
+# en Kubernetes/EKS no. Con Argo el lookup suele venir vacío: en OpenShift
+# poner platform: openshift y crear el ConfigMap spire-agent-kubelet-ca
+# (clave ca.crt) o pegar el PEM en kubeletCA.bundle.
+# kubeletRoot: /var/lib/kubelet en OpenShift, EKS y Kubernetes. Cambiarlo si
+# la AMI mueve el kubelet.
+spire:
+  enabled: false
+  namespace: spire
+  platform: auto
+  clusterName: alquimia
+  # Vacío: runtime.zeroTrust.trustDomain.
+  trustDomain: ""
+  storage: 1Gi
+  storageClass: ""
+  socketHostPath: /run/spire/sockets
+  kubeletRoot: /var/lib/kubelet
+  agentRunAsUser: 1000
+  imagePullSecrets: []
+  tolerations: []
+  kubeletCA:
+    bundle: ""
 
 # Sin Keycloak Operator. Con enabled: true usa el PostgreSQL de este chart
 # (base `database`) en el mismo namespace.
@@ -157,13 +281,16 @@ keycloak:
     secretName: ""
   # Realm que emite los JWT de usuarios (OIDC).
   realm: alquimia
-  acceptedAudiences: account,alquimia-cli
-  # Zero Trust de callers: el runtime valida JWT del realm (AUTH_PROVIDER=keycloak).
-  # false: sigue autenticando servicios con API_TOKEN.
+  # El runtime de alquimia-runtime-develop rechaza la audience genérica account.
+  acceptedAudiences: alquimia-runtime
+  # Opcional si runtime.zeroTrust.enabled es false. Con zeroTrust el runtime
+  # usa Keycloak igual (AUTH_PROVIDER=keycloak).
   runtimeAuth:
     enabled: false
     clientId: alquimia-runtime
     clientSecret: ""
+    # Secret del cliente admin que FastAPIKeycloak usa en client_credentials.
+    adminClientSecret: ""
     callbackUri: ""
   # Studio puede quedar en AUTH_STRATEGY=lite. true lo pasa a Keycloak (NextAuth).
   studioAuth:
@@ -188,7 +315,7 @@ keycloak:
     #   alb.ingress.kubernetes.io/target-type: ip
     #   alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     #   alb.ingress.kubernetes.io/ssl-redirect: "443"
-    #   alb.ingress.kubernetes.io/group.name: alquimia
+    #   alb.ingress.kubernetes.io/group.name: acme
     #   alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/ID
     tls:
       enabled: false
@@ -197,16 +324,40 @@ keycloak:
     username: ""
     password: ""
 
+# false: no crea ClusterPolicy. Kyverno tiene que estar instalado en el cluster;
+# este chart no lo instala. true: aplica las políticas de
+# alquimia-runtime-develop/k8s/policies/kyverno a cada Pod del namespace.
+# Con Enforce, un Pod que no cumpla (registro, securityContext, límites de
+# CPU/memoria o firma de alquimiaai/runtime) no se crea.
+kyverno:
+  enabled: false
+
 studio:
   enabled: true
   replicas: 1
   storage: 5Gi
-  # Vacío: alquimia-studio.<appsDomain> (dominio apps del cluster).
+  # cluster: solo el Service (svc.cluster.local). ingress: Ingress. route: Route de OpenShift.
+  exposure: route
+  # Vacío en route: alquimia-studio.<appsDomain>. En ingress es obligatorio.
   host: ""
+  ingress:
+    className: ""
+    path: /
+    pathType: Prefix
+    annotations: {}
   config:
     DB_STRATEGY: lite
     AUTH_STRATEGY: lite
     NEXT_PUBLIC_DEFAULT_NAMESPACE: alquimia
+    # on y true en el perfil zero trust. off y false dejan Studio sin ZT.
+    NEXT_PUBLIC_ZERO_TRUST: "off"
+    NEXT_PUBLIC_TOOL_AUTHZ_ENABLED: "false"
+    RUNTIME_USER_IDENTITY: passthrough
+    RUNTIME_TOKEN_AUDIENCE: alquimia-runtime
+    # Mismo host que registry.public.host. Ejemplo: registry.acme.example
+    EXTERNAL_REGISTRY_URL: registry.acme.example
+    EXTERNAL_REGISTRY_AGENTS_PROJECT: agents
+    EXTERNAL_REGISTRY_BRAINS_PROJECT: brains
     # Se ignora si otel.enabled: el SDK queda activo para exportar al collector.
     OTEL_SDK_DISABLED: "true"
     NODE_ENV: production

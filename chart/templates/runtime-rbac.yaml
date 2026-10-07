@@ -1,0 +1,39 @@
+{{- if and .Values.runtime.enabled .Values.runtime.zeroTrust.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alquimia-runtime-sa
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+{{- if .Values.runtime.zeroTrust.agentspaceProvisioning }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alquimia-runtime-agentspace-provisioner
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterstaticentries"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alquimia-runtime-agentspace-provisioner
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alquimia-runtime-agentspace-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: alquimia-runtime-sa
+    namespace: {{ include "alquimia.namespace" . }}
+{{- end }}
+{{- end }}

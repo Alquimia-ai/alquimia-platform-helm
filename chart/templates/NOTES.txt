@@ -1,9 +1,5 @@
 Chart alquimia desplegado en el namespace {{ include "alquimia.namespace" . }}.
-{{- if .Values.createNamespace }}
-Namespace: se crea solo si no existe.
-{{- else }}
-Namespace: no lo gestiona el chart (debe existir de antemano).
-{{- end }}
+Namespace: no lo gestiona el chart. Tiene que existir antes (helm --create-namespace).
 
 Secrets: backend={{ .Values.secrets.backend | default "sealed" }}.
 {{- if eq (.Values.secrets.backend | default "sealed") "sealed" }}
@@ -20,9 +16,13 @@ No sellar alquimia-vault ni vault-keys: los escribe vault-unsealer.
 Vault queda instalado en este chart (StatefulSet `vault`).
 {{- if .Values.vault.autoUnseal }}
 El Deployment `vault-unsealer` hace init + unseal en bucle y guarda
-las keys en el secret {{ .Values.vault.keysSecret }}. El root token
-se escribe en `alquimia-vault` (VAULT_TOKEN).
+las keys y el root token en el secret {{ .Values.vault.keysSecret }}.
 Si se pierde ese secret y el PVC de Vault sigue, no hay forma de unsealar.
+{{- if .Values.runtime.zeroTrust.enabled }}
+El runtime entra a Vault con Kubernetes auth. No usa el Secret `alquimia-vault`.
+{{- else }}
+Sin Zero Trust el runtime lee `VAULT_TOKEN` del Secret `alquimia-vault`.
+{{- end }}
 {{- $sa := .Values.vault.serviceAccount | default dict }}
 {{- if and (hasKey $sa "create") (not $sa.create) }}
 El SA {{ $sa.name | default "vault-unsealer" }} no lo crea el chart (docs/vault-unsealer-rbac.md).
@@ -49,10 +49,13 @@ Studio: https://{{ $studioHost }}
 Keycloak usa el PostgreSQL de este chart (base {{ .Values.keycloak.database }}). No requiere el Keycloak Operator.
 El admin sale del secret keycloak-secret (KC_BOOTSTRAP_ADMIN_USERNAME / KC_BOOTSTRAP_ADMIN_PASSWORD).
 Issuer: {{ include "alquimia.keycloakIssuer" . }}
-{{- if .Values.keycloak.runtimeAuth.enabled }}
-Runtime: AUTH_PROVIDER=keycloak (client {{ .Values.keycloak.runtimeAuth.clientId }}).
+{{- if .Values.runtime.zeroTrust.enabled }}
+Runtime: Zero Trust (AUTH_PROVIDER=keycloak, SPIFFE, firma OCI {{ .Values.runtime.zeroTrust.signaturePolicy }}).
+SPIRE tiene que estar instalado: el chart monta el socket CSI y no despliega el server.
+{{- else if .Values.keycloak.runtimeAuth.enabled }}
+Runtime: AUTH_PROVIDER=keycloak (client {{ .Values.keycloak.runtimeAuth.clientId }}), sin SPIFFE.
 {{- else }}
-Runtime: sigue con API_TOKEN. Para JWT de usuarios, keycloak.runtimeAuth.enabled.
+Runtime: API_TOKEN, sin Zero Trust. runtime.zeroTrust.enabled lo activa.
 {{- end }}
 {{- if .Values.keycloak.studioAuth.enabled }}
 Studio: autentica con este realm (client {{ .Values.keycloak.studioAuth.clientId }}).

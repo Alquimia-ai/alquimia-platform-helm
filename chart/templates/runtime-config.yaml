@@ -2,6 +2,12 @@
 {{- if and .Values.otel.enabled (not .Values.otel.endpoint) }}
 {{- fail "otel.enabled requiere otel.endpoint (URL base OTLP HTTP del collector)" }}
 {{- end }}
+{{- if and (eq (include "alquimia.runtimeKeycloak" .) "true") (not (include "alquimia.keycloakUrl" . | trim)) }}
+{{- fail "AUTH_PROVIDER=keycloak requiere keycloak.enabled o existing.url / existing.service" }}
+{{- end }}
+{{- if and .Values.runtime.zeroTrust.enabled (contains "account" (printf ",%s," .Values.runtime.zeroTrust.acceptedAudiences)) }}
+{{- fail "runtime.zeroTrust.acceptedAudiences no puede incluir account: el runtime no arranca" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,16 +20,57 @@ metadata:
 data:
   DEBUG: {{ .Values.runtime.config.DEBUG | quote }}
   IS_ALLOWED_CREDENTIALS: {{ .Values.runtime.config.IS_ALLOWED_CREDENTIALS | quote }}
-  ORAS_INSECURE: {{ .Values.runtime.config.ORAS_INSECURE | quote }}
-  ORAS_PLAIN_HTTP: {{ .Values.runtime.config.ORAS_PLAIN_HTTP | quote }}
-  ALQUIMIA_OCI_DEV_MODE: {{ .Values.runtime.config.ALQUIMIA_OCI_DEV_MODE | quote }}
-  ALQUIMIA_OCI_REGISTRY_DEFAULT: {{ printf "oras-registry.%s.svc.cluster.local:5000" (include "alquimia.namespace" .) | quote }}
+  {{- if .Values.runtime.zeroTrust.enabled }}
+  ORAS_INSECURE: {{ include "alquimia.registryInsecure" . | quote }}
+  ORAS_PLAIN_HTTP: {{ include "alquimia.registryPlainHttp" . | quote }}
+  {{- /* La imagen ignora ORAS_PLAIN_HTTP/ORAS_INSECURE si DEV_MODE no es true. En remote HTTPS quedan en false y DEV_MODE no se prende. La firma sigue en signaturePolicy. */}}
+  ALQUIMIA_OCI_DEV_MODE: {{ if or (eq (include "alquimia.registryPlainHttp" .) "true") (eq (include "alquimia.registryInsecure" .) "true") }}"true"{{ else }}"false"{{ end }}
+  ALQUIMIA_OCI_SIGNATURE_POLICY: {{ .Values.runtime.zeroTrust.signaturePolicy | quote }}
+  TLS_ENFORCE: {{ .Values.runtime.zeroTrust.tlsEnforce | quote }}
+  {{- else }}
+  ORAS_INSECURE: {{ include "alquimia.registryInsecure" . | quote }}
+  ORAS_PLAIN_HTTP: {{ include "alquimia.registryPlainHttp" . | quote }}
+  ALQUIMIA_OCI_DEV_MODE: {{ if or (eq (include "alquimia.registryPlainHttp" .) "true") (eq (include "alquimia.registryInsecure" .) "true") }}{{ .Values.runtime.config.ALQUIMIA_OCI_DEV_MODE | quote }}{{ else }}"false"{{ end }}
+  ALQUIMIA_OCI_SIGNATURE_POLICY: "off"
+  TLS_ENFORCE: "false"
+  {{- end }}
+  KAFKA_SECURITY_PROTOCOL: {{ if .Values.runtime.zeroTrust.enabled }}{{ .Values.runtime.zeroTrust.kafkaSecurityProtocol | quote }}{{ else }}"PLAINTEXT"{{ end }}
+  ALQUIMIA_OCI_REGISTRY_DEFAULT: {{ include "alquimia.registryHost" . | quote }}
+  ALQUIMIA_OCI_NAMESPACE_AGENTSPACES: {{ .Values.studio.config.EXTERNAL_REGISTRY_AGENTS_PROJECT | quote }}
+  ALQUIMIA_OCI_NAMESPACE_BRAINS: {{ .Values.studio.config.EXTERNAL_REGISTRY_BRAINS_PROJECT | quote }}
+  ALQUIMIA_OCI_REFERRERS_FALLBACK: {{ .Values.runtime.config.ALQUIMIA_OCI_REFERRERS_FALLBACK | quote }}
+  ALQUIMIA_OCI_SUBPROCESS_TIMEOUT: {{ .Values.runtime.config.ALQUIMIA_OCI_SUBPROCESS_TIMEOUT | quote }}
+  ALQUIMIA_OCI_COSIGN_HOME: {{ .Values.runtime.config.ALQUIMIA_OCI_COSIGN_HOME | quote }}
+  ALQUIMIA_OCI_COSIGN_TLOG_UPLOAD: {{ .Values.runtime.config.ALQUIMIA_OCI_COSIGN_TLOG_UPLOAD | quote }}
+  {{- with .Values.runtime.cosign.publicKey }}
+  ALQUIMIA_OCI_COSIGN_PUBKEY: /etc/alquimia/cosign/cosign.pub
+  {{- end }}
   ALQUIMIA_REGISTRY_DIR: {{ .Values.runtime.config.ALQUIMIA_REGISTRY_DIR | quote }}
   ALQUIMIA_REGISTRY_SECRET_RESOLVER: {{ .Values.runtime.config.ALQUIMIA_REGISTRY_SECRET_RESOLVER | quote }}
+  ALQUIMIA_REGISTRY_REHYDRATE_ENABLED: {{ .Values.runtime.config.ALQUIMIA_REGISTRY_REHYDRATE_ENABLED | quote }}
+  ALQUIMIA_REGISTRY_REHYDRATE_BUNDLED_BLOBS: {{ .Values.runtime.config.ALQUIMIA_REGISTRY_REHYDRATE_BUNDLED_BLOBS | quote }}
   VAULT_ADDR: {{ printf "http://vault.%s.svc.cluster.local:8200" (include "alquimia.namespace" .) | quote }}
   VAULT_MOUNT_POINT: {{ .Values.runtime.config.VAULT_MOUNT_POINT | quote }}
+  VAULT_TLS: {{ .Values.runtime.config.VAULT_TLS | quote }}
+  DB_POOL_SIZE: {{ .Values.runtime.config.DB_POOL_SIZE | quote }}
+  DB_POOL_OVERFLOW: {{ .Values.runtime.config.DB_POOL_OVERFLOW | quote }}
+  DB_POOL_PRE_PING: {{ .Values.runtime.config.DB_POOL_PRE_PING | quote }}
+  DB_POOL_RECYCLE: {{ .Values.runtime.config.DB_POOL_RECYCLE | quote }}
+  DB_CREATE_ON_STARTUP: {{ .Values.runtime.config.DB_CREATE_ON_STARTUP | quote }}
+  TOOL_AUTHZ_ENABLED: {{ .Values.runtime.config.TOOL_AUTHZ_ENABLED | quote }}
+  TOOL_AUTHZ_DEFAULT_DENY: {{ .Values.runtime.config.TOOL_AUTHZ_DEFAULT_DENY | quote }}
+  KNOWLEDGE_AUTHZ_ENABLED: {{ .Values.runtime.config.KNOWLEDGE_AUTHZ_ENABLED | quote }}
+  KNOWLEDGE_AUTHZ_DEFAULT_DENY: {{ .Values.runtime.config.KNOWLEDGE_AUTHZ_DEFAULT_DENY | quote }}
   KAFKA_MAX_REQUEST_SIZE: {{ .Values.runtime.config.KAFKA_MAX_REQUEST_SIZE | quote }}
   KAFKA_BOOTSTRAP_SERVERS: {{ printf "kafka.%s.svc.cluster.local:9092" (include "alquimia.namespace" .) | quote }}
+  ALQUIMIA_KNOWLEDGE_PROVIDER: qdrant
+  QDRANT_URL: {{ printf "http://qdrant.%s.svc.cluster.local:6333" (include "alquimia.namespace" .) | quote }}
+  QDRANT_HTTPS: "false"
+  {{- $studioHost := include "alquimia.studioHost" . | trim }}
+  {{- if $studioHost }}
+  ALLOWED_ORIGINS: {{ printf "[\"https://%s\"]" $studioHost | quote }}
+  {{- end }}
+  OTEL_EXCLUDED_ATTRIBUTES: {{ .Values.otel.excludedAttributes | quote }}
   {{- if .Values.otel.enabled }}
   OTEL_ALQUIMIA_SERVICE_NAME: alquimia
   OTEL_ALQUIMIA_METER_NAME: alquimia-metrics
@@ -31,19 +78,23 @@ data:
   OTEL_COLLECTOR_ENDPOINT_TRACES: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.tracesPath) | quote }}
   OTEL_COLLECTOR_ENDPOINT_LOGS: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.logsPath) | quote }}
   OTEL_COLLECTOR_ENDPOINT: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.metricsPath) | quote }}
-  {{- with .Values.otel.excludedAttributes }}
-  OTEL_EXCLUDED_ATTRIBUTES: {{ . | quote }}
   {{- end }}
-  {{- end }}
-  {{- if .Values.keycloak.runtimeAuth.enabled }}
+  {{- if eq (include "alquimia.runtimeKeycloak" .) "true" }}
   AUTH_PROVIDER: keycloak
   KEYCLOAK_SERVER_URL: {{ trimSuffix "/" (include "alquimia.keycloakUrl" . | trim) | quote }}
   KEYCLOAK_REALM: {{ .Values.keycloak.realm | quote }}
   KEYCLOAK_CLIENT_ID: {{ .Values.keycloak.runtimeAuth.clientId | quote }}
+  {{- if .Values.runtime.zeroTrust.enabled }}
+  KEYCLOAK_ACCEPTED_AUDIENCES: {{ .Values.runtime.zeroTrust.acceptedAudiences | quote }}
+  KEYCLOAK_ROLE_SOURCE_CLIENTS: {{ .Values.runtime.zeroTrust.roleSourceClients | quote }}
+  {{- else }}
   KEYCLOAK_ACCEPTED_AUDIENCES: {{ .Values.keycloak.acceptedAudiences | quote }}
+  {{- end }}
   {{- with .Values.keycloak.runtimeAuth.callbackUri }}
   KEYCLOAK_CALLBACK_URI: {{ . | quote }}
   {{- end }}
+  {{- else }}
+  AUTH_PROVIDER: api_token
   {{- end }}
 {{- if eq (include "alquimia.helmSecrets" .) "true" }}
 ---
@@ -72,6 +123,29 @@ metadata:
 type: Opaque
 stringData:
   REDIS_URL: {{ printf "redis://redis.%s.svc.cluster.local:6379/0" (include "alquimia.namespace" .) | quote }}
+---
+{{- $qdrantNs := include "alquimia.namespace" . }}
+{{- $qdrantExisting := lookup "v1" "Secret" $qdrantNs "alquimia-qdrant" }}
+{{- $qdrantKey := "" }}
+{{- if and $qdrantExisting $qdrantExisting.data (index $qdrantExisting.data "QDRANT_API_KEY") }}
+{{- $qdrantKey = index $qdrantExisting.data "QDRANT_API_KEY" | b64dec }}
+{{- else }}
+{{- $qdrantKey = randAlphaNum 32 }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-qdrant
+  namespace: {{ $qdrantNs }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  QDRANT_URL: {{ printf "http://qdrant.%s.svc.cluster.local:6333" $qdrantNs | quote }}
+  QDRANT_API_KEY: {{ $qdrantKey | quote }}
+  QDRANT_HTTPS: "false"
 ---
 apiVersion: v1
 kind: Secret
@@ -123,7 +197,7 @@ metadata:
 type: Opaque
 stringData:
   API_TOKEN: {{ .Values.runtime.secrets.apiToken | quote }}
-{{- if .Values.keycloak.runtimeAuth.enabled }}
+{{- if eq (include "alquimia.runtimeKeycloak" .) "true" }}
 ---
 apiVersion: v1
 kind: Secret
@@ -137,9 +211,45 @@ metadata:
 type: Opaque
 stringData:
   KEYCLOAK_CLIENT_SECRET: {{ .Values.keycloak.runtimeAuth.clientSecret | quote }}
+  {{- with .Values.keycloak.runtimeAuth.adminClientSecret }}
+  KEYCLOAK_ADMIN_CLIENT_SECRET: {{ . | quote }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.runtime.secrets.encryptionKey .Values.runtime.secrets.registryKey }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-encryption
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  ENCRYPTION_KEY: {{ .Values.runtime.secrets.encryptionKey | quote }}
+  ENCRYPTION_KEY_ID: {{ .Values.runtime.secrets.encryptionKeyId | quote }}
+  ALQUIMIA_REGISTRY_KEY: {{ .Values.runtime.secrets.registryKey | quote }}
+  ALQUIMIA_REGISTRY_KEY_ID: {{ .Values.runtime.secrets.registryKeyId | quote }}
+{{- end }}
+{{- with .Values.runtime.secrets.channelNotificationSecret }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-channel-notifications
+  namespace: {{ include "alquimia.namespace" $ }}
+  labels:
+    {{- include "alquimia.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  CHANNEL_NOTIFICATION_SECRET: {{ . | quote }}
 {{- end }}
 {{- end }}
-{{- if or (eq (include "alquimia.helmSecrets" .) "true") (and .Values.vault.enabled .Values.vault.autoUnseal) }}
+{{- if and (not .Values.runtime.zeroTrust.enabled) (or (eq (include "alquimia.helmSecrets" .) "true") (and .Values.vault.enabled .Values.vault.autoUnseal)) }}
 ---
 apiVersion: v1
 kind: Secret
@@ -187,5 +297,20 @@ metadata:
 type: kubernetes.io/dockerconfigjson
 stringData:
   .dockerconfigjson: '{"auths":{}}'
+{{- end }}
+{{- with .Values.runtime.cosign.publicKey }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alquimia-cosign
+  namespace: {{ include "alquimia.namespace" $ }}
+  labels:
+    {{- include "alquimia.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  cosign.pub: |
+{{ . | nindent 4 }}
 {{- end }}
 {{- end }}
