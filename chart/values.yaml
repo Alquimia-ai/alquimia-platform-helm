@@ -336,6 +336,12 @@ studio:
   enabled: true
   replicas: 1
   storage: 5Gi
+  oci:
+    # Vacío: Studio conserva su política basada en EXTERNAL_REGISTRY_URL.
+    allowedRegistries: []
+    # Secret existente en el namespace de Studio, clave OCI_REGISTRY_CREDENTIALS.
+    # El chart solo lo referencia; nunca recibe ni crea su contenido.
+    credentialsSecret: ""
   # cluster: solo el Service (svc.cluster.local). ingress: Ingress. route: Route de OpenShift.
   exposure: route
   # Vacío en route: alquimia-studio.<appsDomain>. En ingress es obligatorio.

@@ -1,0 +1,7 @@
+# Overlay adicional de Studio; no sustituye los values privados de la instalación.
+# Agregar como último -f en los despliegues de alquimia-code.
+studio:
+  oci:
+    allowedRegistries:
+      - registry.alquimia.ai
+    credentialsSecret: alquimia-studio-external-oci

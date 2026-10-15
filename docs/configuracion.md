@@ -79,6 +79,36 @@ cosign sign --key cosign.key --use-signing-config=false --tlog-upload=false \
   registry.acme.example/brains/<nombre>:latest
 ```
 
+## Acceso OCI directo de Studio en EKS
+
+Red Teaming resuelve el Brain del agente directamente desde Studio. Su permiso
+de acceso es independiente del registry por defecto y de las credenciales de Runtime:
+
+```yaml
+studio:
+  oci:
+    allowedRegistries:
+      - registry.alquimia.ai
+    credentialsSecret: alquimia-studio-external-oci
+```
+
+`allowedRegistries` genera `OCI_ALLOWED_REGISTRIES` en el Deployment de Studio.
+`credentialsSecret` genera `OCI_REGISTRY_CREDENTIALS` mediante `secretKeyRef`,
+usando la clave del mismo nombre. El Secret debe existir en el namespace de Studio;
+el chart no lo crea, copia ni elimina. Su contenido debe usar el formato
+`registry-host=usuario:token`. No poner su valor en Git, en values ni en `--set`.
+
+La instalación EKS `alquimia-code` ya tiene ese Secret. Incluir
+`chart/values-eks-alquimia-code-studio.yaml` como último archivo de values en sus
+despliegues habituales, conservando el resto de los values privados y la versión
+del chart aprobada para la instalación. El overlay contiene solo ajustes de Studio:
+no cambia Runtime, imágenes, selección de Brain ni `EXTERNAL_REGISTRY_URL`.
+
+Ambos parámetros quedan vacíos por defecto para preservar otras instalaciones.
+Cambiar el nombre del Secret modifica el pod; rotar su contenido requiere reiniciar
+Studio para renovar las variables de entorno. Respaldar y gestionar ese Secret
+por separado; reinstalar el cluster no recupera una credencial que no está en Git.
+
 ## Keycloak
 
 El realm, el identificador de client y los secretos pertenecen a la instalación. El client del runtime requiere un service account con permiso de lectura de usuarios del realm. Studio redirige a `https://<studio.host>`.

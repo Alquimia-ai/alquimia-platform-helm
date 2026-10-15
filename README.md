@@ -24,6 +24,11 @@ sudo install -m 755 kubeseal /usr/local/bin/kubeseal
 
 `chart/values.yaml` es el perfil base, sin credenciales. La instalación lo combina con un archivo de values privado o con `chart/values-sealed.yaml`.
 
+En EKS `alquimia-code`, agregar `chart/values-eks-alquimia-code-studio.yaml` como
+último archivo de values para conservar el acceso OCI de Studio al actualizarlo.
+Solo contiene el host permitido y la referencia al Secret existente, sin credenciales.
+Ver [acceso OCI de Studio](docs/configuracion.md#acceso-oci-directo-de-studio-en-eks).
+
 El namespace de ejemplo del chart es `alquimia-platform`. Tiene que coincidir con `spec.destination.namespace` de `argocd/application.yaml`.
 
 Hosts de ejemplo:

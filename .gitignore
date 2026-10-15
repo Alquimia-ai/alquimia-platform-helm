@@ -3,3 +3,4 @@ sealed-cert.pem
 *.pem
 .DS_Store
 extra/
+__pycache__/

@@ -136,6 +136,17 @@ spec:
           env:
             - name: NEDB_DATA_DIR
               value: /app/.data
+            {{- with .Values.studio.oci.allowedRegistries }}
+            - name: OCI_ALLOWED_REGISTRIES
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.studio.oci.credentialsSecret }}
+            - name: OCI_REGISTRY_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: OCI_REGISTRY_CREDENTIALS
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: alquimia-studio-config
