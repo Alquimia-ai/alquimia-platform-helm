@@ -31,8 +31,12 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   replicas: {{ .Values.runtime.masterReplicas }}
+  {{- $strategy := .Values.runtime.masterUpdateStrategy | default "Recreate" }}
+  {{- if not (or (eq $strategy "Recreate") (eq $strategy "RollingUpdate")) }}
+  {{- fail "runtime.masterUpdateStrategy debe ser Recreate o RollingUpdate" }}
+  {{- end }}
   strategy:
-    type: Recreate
+    type: {{ $strategy }}
   selector:
     matchLabels:
       app: alquimia-runtime
@@ -241,8 +245,13 @@ spec:
               value: /var/docker-config
             - name: HF_HOME
               value: /var/lib/alquimia/cache
+            {{- if eq (include "alquimia.hasEmbeddings" .) "true" }}
+            - name: ALQUIMIA_EMBEDDINGS_CONFIG_DIR
+              value: /var/lib/alquimia
+            {{- end }}
             - name: TMPDIR
               value: /tmp
+            {{- include "alquimia.cosignPasswordEnv" . | nindent 12 }}
             {{- include "alquimia.registryTrustEnv" . | nindent 12 }}
             {{- if .Values.runtime.zeroTrust.enabled }}
             - name: SPIFFE_ENABLED
@@ -315,14 +324,11 @@ spec:
               mountPath: /var/docker-config
             - name: cache-storage
               mountPath: /var/lib/alquimia/cache
+            {{- include "alquimia.embeddingsMount" . | nindent 12 }}
             - name: tmp
               mountPath: /tmp
             {{- include "alquimia.registryTrustMount" . | nindent 12 }}
-            {{- if .Values.runtime.cosign.publicKey }}
-            - name: cosign-key
-              mountPath: /etc/alquimia/cosign
-              readOnly: true
-            {{- end }}
+            {{- include "alquimia.cosignMount" . | nindent 12 }}
             {{- if .Values.runtime.zeroTrust.enabled }}
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
@@ -371,15 +377,11 @@ spec:
             claimName: alquimia-registry-s3
         - name: cache-storage
           emptyDir: {}
+        {{- include "alquimia.embeddingsVolume" . | nindent 8 }}
         - name: tmp
           emptyDir: {}
         {{- include "alquimia.registryTrustVolumes" . | nindent 8 }}
-        {{- if .Values.runtime.cosign.publicKey }}
-        - name: cosign-key
-          configMap:
-            name: alquimia-cosign
-            defaultMode: 0444
-        {{- end }}
+        {{- include "alquimia.cosignVolume" . | nindent 8 }}
         - name: registry-config
           secret:
             secretName: alquimia-registry-config

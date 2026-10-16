@@ -50,10 +50,13 @@ data:
   EXTERNAL_REGISTRY_AGENTS_PROJECT: {{ .Values.studio.config.EXTERNAL_REGISTRY_AGENTS_PROJECT | quote }}
   EXTERNAL_REGISTRY_BRAINS_PROJECT: {{ .Values.studio.config.EXTERNAL_REGISTRY_BRAINS_PROJECT | quote }}
   {{- if .Values.otel.enabled }}
-  OTEL_SDK_DISABLED: "false"
-  OTEL_ALQUIMIA_SERVICE_NAME: alquimia-studio
-  OTEL_EXPORTER_INTERNAL_MILIS: {{ .Values.otel.intervalMillis | quote }}
+  OTEL_SDK_DISABLED: {{ .Values.otel.studio.sdkDisabled | quote }}
+  OTEL_ALQUIMIA_SERVICE_NAME: {{ include "alquimia.otelServiceName" (dict "prefix" .Values.otel.serviceNamePrefix "name" .Values.otel.studio.serviceName) | quote }}
+  OTEL_EXPORTER_INTERVAL_MILLIS: {{ .Values.otel.intervalMillis | quote }}
+  OTEL_EXPORTER_INTERNAL_MILIS: {{ .Values.otel.internalMillis | quote }}
+  OTEL_EXPORTER_TIMEOUT_MILIS: {{ .Values.otel.timeoutMillis | quote }}
   OTEL_COLLECTOR_ENDPOINT_TRACES: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.tracesPath) | quote }}
+  OTEL_COLLECTOR_ENDPOINT_LOGS: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.logsPath) | quote }}
   OTEL_COLLECTOR_ENDPOINT: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.metricsPath) | quote }}
   {{- else }}
   OTEL_SDK_DISABLED: {{ .Values.studio.config.OTEL_SDK_DISABLED | quote }}

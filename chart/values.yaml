@@ -42,7 +42,7 @@ images:
   qdrant: docker.io/qdrant/qdrant:v1.19.2
   registry: ghcr.io/oras-project/registry:v1.0.0-rc.4
   rclone: rclone/rclone:1.75.1
-  runtime: alquimiaai/runtime:0.5.4
+  runtime: alquimiaai/runtime:0.5.5-dev
   studio: alquimiaai/studio:latest-20261002-2112
   vault: docker.io/hashicorp/vault:1.21.2
   kafka: apache/kafka:3.8.0
@@ -133,23 +133,40 @@ vault:
 
 # Collector OTLP HTTP compartido por runtime y Studio.
 # Documentación: OTEL_COLLECTOR_ENDPOINT* en Runtime configuration y Studio overview.
-# false: el runtime no exporta y Studio respeta OTEL_SDK_DISABLED.
+# false: el runtime no exporta y Studio respeta studio.config.OTEL_SDK_DISABLED.
 otel:
   enabled: false
-  # Base sin /v1. Ej: http://otel-collector.observability.svc.cluster.local:4318
+  # Base sin /v1. Interna o pública.
+  # Ej: http://otel-collector.observability.svc.cluster.local:4318
   endpoint: ""
   tracesPath: /v1/traces
   metricsPath: /v1/metrics
   logsPath: /v1/logs
+  # Se antepone a OTEL_ALQUIMIA_SERVICE_NAME. Vacío: queda serviceName.
+  # Ejemplo: eks- con runtime.serviceName alquimia-runtime → eks-alquimia-runtime.
+  serviceNamePrefix: ""
   intervalMillis: "5000"
+  internalMillis: "5000"
+  timeoutMillis: "5000"
   # PII que no debe salir en telemetría, aunque el collector todavía no esté.
   excludedAttributes: session_id,channel_id,user_id
+  runtime:
+    serviceName: alquimia
+    meterName: alquimia-metrics
+    sdkDisabled: "false"
+    excludedUrls: liveness,readiness
+  studio:
+    serviceName: alquimia-studio
+    sdkDisabled: "false"
 
 runtime:
   enabled: true
   masterReplicas: 1
   workerReplicas: 3
   registryStorage: 10Gi
+  # Recreate: el PVC del registry es ReadWriteOnce y no admite dos pods a la vez.
+  # RollingUpdate deja el rollout colgado hasta que el pod anterior suelta el disco.
+  masterUpdateStrategy: Recreate
   # cluster: solo el Service (svc.cluster.local). ingress: Ingress. route: Route de OpenShift.
   exposure: cluster
   host: ""
@@ -211,10 +228,27 @@ runtime:
     orasPlainHttp: "false"
     orasInsecure: "false"
     kafkaSecurityProtocol: PLAINTEXT
-  # PEM de la clave pública de cosign de la org. Vacío: no se monta y los
-  # pulls con signaturePolicy=required siguen sin poder verificar.
+  # publicKey: PEM de la clave pública. Vacío: no se monta y los pulls con
+  # signaturePolicy=required siguen sin poder verificar.
+  # privateKey: PEM de la clave privada. Vacío: el runtime no firma en el push.
+  # Se guarda en el Secret alquimia-cosign-key, se monta en
+  # /etc/alquimia/cosign/cosign.key y ALQUIMIA_OCI_COSIGN_KEY apunta a esa ruta.
+  # password: passphrase de esa clave (COSIGN_PASSWORD). Vacío es válido.
   cosign:
     publicKey: ""
+    privateKey: ""
+    password: ""
+  # Vacío: no se monta embeddings.yaml. provider_id: openai, huggingface,
+  # huggingface_hub o inmemory. Un secreto va como
+  # $secretRef y vive en Vault (secret/<agentspace>/shared/<KEY>).
+  # Ejemplo:
+  #   provider_id: huggingface
+  #   params:
+  #     model: https://embeddings.acme.example
+  #     api_key:
+  #       $secretRef: EMBEDDINGS_API_KEY
+  embeddings:
+    config: {}
   secrets:
     kafkaSigningKey: ""
     apiToken: ""
@@ -358,7 +392,7 @@ studio:
     EXTERNAL_REGISTRY_URL: registry.acme.example
     EXTERNAL_REGISTRY_AGENTS_PROJECT: agents
     EXTERNAL_REGISTRY_BRAINS_PROJECT: brains
-    # Se ignora si otel.enabled: el SDK queda activo para exportar al collector.
+    # Se ignora si otel.enabled: el SDK usa otel.studio.sdkDisabled.
     OTEL_SDK_DISABLED: "true"
     NODE_ENV: production
   secrets:

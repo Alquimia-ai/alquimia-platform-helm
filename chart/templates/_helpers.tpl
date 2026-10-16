@@ -192,6 +192,10 @@ false
 {{- printf "%s%s" $base $path -}}
 {{- end }}
 
+{{- define "alquimia.otelServiceName" -}}
+{{- printf "%s%s" (.prefix | default "") (.name | default "") -}}
+{{- end }}
+
 {{- define "alquimia.hasNodeAffinity" -}}
 {{- $na := .local | default dict -}}
 {{- if empty $na }}
@@ -306,5 +310,98 @@ securityContext:
         path: ca.crt
 - name: trust-bundle
   emptyDir: {}
+{{- end }}
+{{- end }}
+
+{{- define "alquimia.embeddingsConfig" -}}
+{{- $cfg := dict -}}
+{{- if .Values.runtime.embeddings -}}
+{{- $cfg = .Values.runtime.embeddings.config | default dict -}}
+{{- end -}}
+{{- if $cfg -}}
+{{- if kindIs "string" $cfg -}}
+{{ $cfg }}
+{{- else -}}
+{{ $cfg | toYaml }}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.hasEmbeddings" -}}
+{{- if include "alquimia.embeddingsConfig" . | trim }}true{{- end -}}
+{{- end }}
+
+{{- define "alquimia.embeddingsMount" -}}
+{{- if eq (include "alquimia.hasEmbeddings" .) "true" }}
+- name: embeddings-config
+  mountPath: /var/lib/alquimia/embeddings.yaml
+  subPath: embeddings.yaml
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "alquimia.embeddingsVolume" -}}
+{{- if eq (include "alquimia.hasEmbeddings" .) "true" }}
+- name: embeddings-config
+  configMap:
+    name: alquimia-embeddings
+    defaultMode: 0444
+{{- end }}
+{{- end }}
+
+{{- define "alquimia.cosignEnabled" -}}
+{{- if or .Values.runtime.cosign.publicKey .Values.runtime.cosign.privateKey }}true{{- end -}}
+{{- end }}
+
+{{- define "alquimia.cosignMount" -}}
+{{- if eq (include "alquimia.cosignEnabled" .) "true" }}
+- name: cosign-key
+  mountPath: /etc/alquimia/cosign
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "alquimia.cosignVolume" -}}
+{{- $pub := .Values.runtime.cosign.publicKey -}}
+{{- $priv := .Values.runtime.cosign.privateKey -}}
+{{- if or $pub $priv }}
+- name: cosign-key
+  {{- if and $pub $priv }}
+  projected:
+    defaultMode: 0444
+    sources:
+      - configMap:
+          name: alquimia-cosign
+          items:
+            - key: cosign.pub
+              path: cosign.pub
+      - secret:
+          name: alquimia-cosign-key
+          items:
+            - key: cosign.key
+              path: cosign.key
+              mode: 0440
+  {{- else if $pub }}
+  configMap:
+    name: alquimia-cosign
+    defaultMode: 0444
+  {{- else }}
+  secret:
+    secretName: alquimia-cosign-key
+    defaultMode: 0440
+    items:
+      - key: cosign.key
+        path: cosign.key
+  {{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "alquimia.cosignPasswordEnv" -}}
+{{- if .Values.runtime.cosign.privateKey }}
+- name: COSIGN_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: alquimia-cosign-key
+      key: COSIGN_PASSWORD
 {{- end }}
 {{- end }}

@@ -68,16 +68,9 @@ Con `registry.mode: local` el chart despliega `oras-registry` en el namespace de
 
 `registry.public` es un segundo registry, de lectura, para los artefactos OCI públicos (proyectos `agents` y `brains`). Requiere usuario y contraseña. En Harbor, una robot account. Esas credenciales no se incluyen en el repositorio.
 
-La política de firma es `required`. Cada artefacto que el runtime obtiene debe estar firmado con la clave privada correspondiente a `runtime.cosign.publicKey`. Sin esa clave pública, o si el artefacto no tiene firma, la descarga falla. La clave privada no reside en el chart: permanece en el proceso de publicación.
+La política de firma es `required`. Cada artefacto que el runtime obtiene debe estar firmado con la clave privada correspondiente a `runtime.cosign.publicKey`. El detalle de la clave pública, la clave privada y `COSIGN_PASSWORD` está en [cosign.md](cosign.md).
 
 Los proyectos por defecto son `agents` y `brains`. Studio (`EXTERNAL_REGISTRY_*_PROJECT`) y el runtime deben usar los mismos nombres. El chart copia los valores de Studio al runtime.
-
-Ejemplo de firma de un tag, sin publicar la firma en un transparency log público:
-
-```bash
-cosign sign --key cosign.key --use-signing-config=false --tlog-upload=false \
-  registry.acme.example/brains/<nombre>:latest
-```
 
 ## Keycloak
 

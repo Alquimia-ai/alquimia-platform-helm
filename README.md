@@ -6,6 +6,8 @@ Qué se despliega y cuánto pide: [docs/recursos.md](docs/recursos.md).
 
 Parámetros de la instalación: [docs/configuracion.md](docs/configuracion.md).
 
+Firma OCI: [docs/cosign.md](docs/cosign.md).
+
 ## Requisitos
 
 - Cluster con `kubectl` o `oc`

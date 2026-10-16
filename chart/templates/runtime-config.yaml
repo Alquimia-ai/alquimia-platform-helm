@@ -45,6 +45,9 @@ data:
   {{- with .Values.runtime.cosign.publicKey }}
   ALQUIMIA_OCI_COSIGN_PUBKEY: /etc/alquimia/cosign/cosign.pub
   {{- end }}
+  {{- with .Values.runtime.cosign.privateKey }}
+  ALQUIMIA_OCI_COSIGN_KEY: /etc/alquimia/cosign/cosign.key
+  {{- end }}
   ALQUIMIA_REGISTRY_DIR: {{ .Values.runtime.config.ALQUIMIA_REGISTRY_DIR | quote }}
   ALQUIMIA_REGISTRY_SECRET_RESOLVER: {{ .Values.runtime.config.ALQUIMIA_REGISTRY_SECRET_RESOLVER | quote }}
   ALQUIMIA_REGISTRY_REHYDRATE_ENABLED: {{ .Values.runtime.config.ALQUIMIA_REGISTRY_REHYDRATE_ENABLED | quote }}
@@ -72,9 +75,13 @@ data:
   {{- end }}
   OTEL_EXCLUDED_ATTRIBUTES: {{ .Values.otel.excludedAttributes | quote }}
   {{- if .Values.otel.enabled }}
-  OTEL_ALQUIMIA_SERVICE_NAME: alquimia
-  OTEL_ALQUIMIA_METER_NAME: alquimia-metrics
+  OTEL_SDK_DISABLED: {{ .Values.otel.runtime.sdkDisabled | quote }}
+  OTEL_ALQUIMIA_SERVICE_NAME: {{ include "alquimia.otelServiceName" (dict "prefix" .Values.otel.serviceNamePrefix "name" .Values.otel.runtime.serviceName) | quote }}
+  OTEL_ALQUIMIA_METER_NAME: {{ .Values.otel.runtime.meterName | quote }}
   OTEL_EXPORTER_INTERVAL_MILLIS: {{ .Values.otel.intervalMillis | quote }}
+  OTEL_EXPORTER_INTERNAL_MILIS: {{ .Values.otel.internalMillis | quote }}
+  OTEL_EXPORTER_TIMEOUT_MILIS: {{ .Values.otel.timeoutMillis | quote }}
+  OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: {{ .Values.otel.runtime.excludedUrls | quote }}
   OTEL_COLLECTOR_ENDPOINT_TRACES: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.tracesPath) | quote }}
   OTEL_COLLECTOR_ENDPOINT_LOGS: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.logsPath) | quote }}
   OTEL_COLLECTOR_ENDPOINT: {{ include "alquimia.otelUrl" (dict "endpoint" .Values.otel.endpoint "path" .Values.otel.metricsPath) | quote }}
@@ -312,5 +319,37 @@ metadata:
 data:
   cosign.pub: |
 {{ . | nindent 4 }}
+{{- end }}
+{{- with .Values.runtime.cosign.privateKey }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alquimia-cosign-key
+  namespace: {{ include "alquimia.namespace" $ }}
+  labels:
+    {{- include "alquimia.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+type: Opaque
+stringData:
+  cosign.key: |
+{{ . | nindent 4 }}
+  COSIGN_PASSWORD: {{ $.Values.runtime.cosign.password | default "" | quote }}
+{{- end }}
+{{- if eq (include "alquimia.hasEmbeddings" .) "true" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alquimia-embeddings
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  embeddings.yaml: |
+{{ include "alquimia.embeddingsConfig" . | trim | nindent 4 }}
 {{- end }}
 {{- end }}
