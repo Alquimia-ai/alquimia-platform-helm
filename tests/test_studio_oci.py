@@ -49,11 +49,17 @@ class StudioOciTests(unittest.TestCase):
         })
         self.assertNotIn(('Secret', 'alquimia-studio-external-oci'), self.eks)
 
-    def test_overlay_only_contains_studio_oci_metadata(self):
+    def test_overlay_only_contains_studio_connection_metadata(self):
         overlay = yaml.safe_load(OVERLAY.read_text())
         self.assertEqual(set(overlay), {'studio'})
-        self.assertEqual(set(overlay['studio']), {'oci'})
+        self.assertEqual(set(overlay['studio']), {'oci', 'redTeaming'})
         self.assertEqual(set(overlay['studio']['oci']), {'allowedRegistries', 'credentialsSecret'})
+        self.assertEqual(overlay['studio']['redTeaming'], {'targetSecretRef': 'RUNTIME_API_KEY'})
+
+    def test_target_credential_is_only_a_reference(self):
+        self.assertEqual(environment(self.eks)['RED_TEAMING_TARGET_SECRET_REF'], {
+            'name': 'RED_TEAMING_TARGET_SECRET_REF', 'value': 'RUNTIME_API_KEY',
+        })
 
     def test_non_studio_resources_do_not_change(self):
         self.assertEqual(set(self.default), set(self.eks))

@@ -136,6 +136,10 @@ spec:
           env:
             - name: NEDB_DATA_DIR
               value: /app/.data
+            {{- with .Values.studio.redTeaming.targetSecretRef }}
+            - name: RED_TEAMING_TARGET_SECRET_REF
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.studio.oci.allowedRegistries }}
             - name: OCI_ALLOWED_REGISTRIES
               value: {{ join "," . | quote }}

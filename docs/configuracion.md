@@ -109,6 +109,18 @@ Cambiar el nombre del Secret modifica el pod; rotar su contenido requiere reinic
 Studio para renovar las variables de entorno. Respaldar y gestionar ese Secret
 por separado; reinstalar el cluster no recupera una credencial que no está en Git.
 
+## Credencial del target de Red Teaming
+
+`studio.redTeaming.targetSecretRef` configura `RED_TEAMING_TARGET_SECRET_REF` en
+Studio. Es el nombre de una credencial que el despliegue de red-teaming ya puede
+resolver, nunca su valor. El overlay EKS usa `RUNTIME_API_KEY`; Studio no recibe
+ni envía esa clave al guardar la configuración. El parámetro queda vacío en el
+perfil base y no modifica recursos ni autenticación de Runtime.
+
+Que el nombre exista no prueba que la credencial funcione con el target. Verificar
+su autenticación mediante un GET protegido antes de iniciar una evaluación. Una
+clave estática de otro despliegue no sustituye un token aceptado por Keycloak.
+
 ## Keycloak
 
 El realm, el identificador de client y los secretos pertenecen a la instalación. El client del runtime requiere un service account con permiso de lectura de usuarios del realm. Studio redirige a `https://<studio.host>`.

@@ -342,6 +342,9 @@ studio:
     # Secret existente en el namespace de Studio, clave OCI_REGISTRY_CREDENTIALS.
     # El chart solo lo referencia; nunca recibe ni crea su contenido.
     credentialsSecret: ""
+  redTeaming:
+    # Nombre de la credencial que ya resuelve el despliegue de red-teaming, no su valor.
+    targetSecretRef: ""
   # cluster: solo el Service (svc.cluster.local). ingress: Ingress. route: Route de OpenShift.
   exposure: route
   # Vacío en route: alquimia-studio.<appsDomain>. En ingress es obligatorio.

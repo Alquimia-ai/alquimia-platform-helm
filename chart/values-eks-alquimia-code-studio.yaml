@@ -1,6 +1,8 @@
 # Overlay adicional de Studio; no sustituye los values privados de la instalación.
 # Agregar como último -f en los despliegues de alquimia-code.
 studio:
+  redTeaming:
+    targetSecretRef: RUNTIME_API_KEY
   oci:
     allowedRegistries:
       - registry.alquimia.ai
