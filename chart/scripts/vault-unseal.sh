@@ -288,7 +288,6 @@ configure_k8s_auth() {
   fi
   if [ -f /tmp/k8s-auth.ok ]; then
     refresh_k8s_reviewer || true
-    enable_kv || true
     apply_runtime_policies || true
     return 0
   fi
@@ -303,7 +302,6 @@ configure_k8s_auth() {
     return 1
   fi
 
-  enable_kv || return 1
   refresh_k8s_reviewer || return 1
 
   code=$(vault_api POST /v1/sys/auth/jwt '{"type":"jwt"}' /tmp/vault-jwt-enable.json)
@@ -347,7 +345,11 @@ while true; do
     200|429|472|473)
       if load_keys; then
         save_keys "$UNSEAL_KEY" "$ROOT_TOKEN"
-        configure_k8s_auth || true
+        # KV v2 lo usa el runtime con y sin Zero Trust. Si falla, el HTTP
+        # queda en el log y no se sigue: el proximo ciclo reintenta.
+        if enable_kv; then
+          configure_k8s_auth || true
+        fi
       fi
       ;;
     501)
