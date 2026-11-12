@@ -42,8 +42,8 @@ images:
   qdrant: docker.io/qdrant/qdrant:v1.19.2
   registry: ghcr.io/oras-project/registry:v1.0.0-rc.4
   rclone: rclone/rclone:1.75.1
-  runtime: alquimiaai/runtime:0.5.5-dev
-  studio: alquimiaai/studio:latest-20261002-2112
+  runtime: alquimiaai/runtime:0.7.2
+  studio: alquimiaai/studio:0.2.1
   vault: docker.io/hashicorp/vault:1.21.2
   kafka: apache/kafka:3.8.0
   curl: curlimages/curl:8.11.1
