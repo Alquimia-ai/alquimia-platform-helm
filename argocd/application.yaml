@@ -1,7 +1,7 @@
-# destination.namespace debe coincidir con chart/values.yaml (namespace).
-# metadata.namespace: argocd u openshift-gitops, según el cluster.
-# Con spire.enabled el chart también crea recursos en el namespace `spire`
-# (y CRDs/ClusterRole). El AppProject tiene que permitir ese namespace.
+# destination.namespace must match chart/values.yaml (namespace).
+# metadata.namespace: argocd or openshift-gitops, depending on the cluster.
+# With spire.enabled the chart also creates resources in the `spire` namespace
+# (and CRDs/ClusterRole). The AppProject must allow that namespace.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -16,7 +16,7 @@ spec:
     helm:
       valueFiles:
         - values.yaml
-        # Perfil zero trust, sin Sealed Secrets. Reemplaza la línea de abajo.
+        # Zero trust profile, without Sealed Secrets. Replaces the line below.
         # - values-zt.yaml
         - values-sealed.yaml
   destination:

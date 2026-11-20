@@ -135,10 +135,10 @@ spec:
               rc=$?
               set -e
               if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
-                echo "fetch-registry fallo: $rc"
+                echo "fetch-registry failed: $rc"
                 exit "$rc"
               fi
-              echo "fetch-registry listo (exit $rc)"
+              echo "fetch-registry ready (exit $rc)"
           env:
             - name: RCLONE_S3_PROVIDER
               valueFrom:
@@ -428,7 +428,7 @@ spec:
 {{- $host := .Values.runtime.host | default "" }}
 {{- if eq $exposure "ingress" }}
 {{- if not $host }}
-{{- fail "runtime.exposure ingress requiere runtime.host" }}
+{{- fail "runtime.exposure ingress requires runtime.host" }}
 {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -489,6 +489,6 @@ spec:
     insecureEdgeTerminationPolicy: Redirect
   wildcardPolicy: None
 {{- else if ne $exposure "cluster" }}
-{{- fail "runtime.exposure tiene que ser cluster, ingress o route" }}
+{{- fail "runtime.exposure must be cluster, ingress, or route" }}
 {{- end }}
 {{- end }}

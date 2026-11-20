@@ -1,5 +1,5 @@
-# Overlay adicional de Studio; no sustituye los values privados de la instalación.
-# Agregar como último -f en los despliegues de alquimia-code.
+# Extra Studio overlay; it does not replace the installation's private values.
+# Add it as the last -f on alquimia-code deploys.
 studio:
   redTeaming:
     targetSecretRef: RUNTIME_API_KEY

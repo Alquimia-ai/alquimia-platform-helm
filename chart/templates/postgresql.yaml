@@ -90,8 +90,8 @@ spec:
             capabilities:
               drop:
                 - ALL
-              # La imagen oficial arranca como root, hace chown de PGDATA y
-              # baja a postgres con gosu. Sin estas caps el entrypoint muere.
+              # The official image starts as root, chowns PGDATA, and
+              # drops to postgres with gosu. Without these caps the entrypoint dies.
               add:
                 - CHOWN
                 - DAC_OVERRIDE

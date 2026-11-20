@@ -65,7 +65,7 @@ spec:
               rc=$?
               set -e
               if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
-                echo "fetch-registry fallo: $rc"
+                echo "fetch-registry failed: $rc"
                 exit "$rc"
               fi
               echo "Registry ready. Exit: $rc"

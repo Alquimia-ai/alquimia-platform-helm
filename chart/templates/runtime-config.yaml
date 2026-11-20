@@ -1,12 +1,12 @@
 {{- if .Values.runtime.enabled }}
 {{- if and .Values.otel.enabled (not .Values.otel.endpoint) }}
-{{- fail "otel.enabled requiere otel.endpoint (URL base OTLP HTTP del collector)" }}
+{{- fail "otel.enabled requires otel.endpoint (OTLP HTTP base URL of the collector)" }}
 {{- end }}
 {{- if and (eq (include "alquimia.runtimeKeycloak" .) "true") (not (include "alquimia.keycloakUrl" . | trim)) }}
-{{- fail "AUTH_PROVIDER=keycloak requiere keycloak.enabled o existing.url / existing.service" }}
+{{- fail "AUTH_PROVIDER=keycloak requires keycloak.enabled or existing.url / existing.service" }}
 {{- end }}
 {{- if and .Values.runtime.zeroTrust.enabled (contains "account" (printf ",%s," .Values.runtime.zeroTrust.acceptedAudiences)) }}
-{{- fail "runtime.zeroTrust.acceptedAudiences no puede incluir account: el runtime no arranca" }}
+{{- fail "runtime.zeroTrust.acceptedAudiences must not include account: the runtime will not start" }}
 {{- end }}
 apiVersion: v1
 kind: ConfigMap
@@ -23,7 +23,7 @@ data:
   {{- if .Values.runtime.zeroTrust.enabled }}
   ORAS_INSECURE: {{ include "alquimia.registryInsecure" . | quote }}
   ORAS_PLAIN_HTTP: {{ include "alquimia.registryPlainHttp" . | quote }}
-  {{- /* La imagen ignora ORAS_PLAIN_HTTP/ORAS_INSECURE si DEV_MODE no es true. En remote HTTPS quedan en false y DEV_MODE no se prende. La firma sigue en signaturePolicy. */}}
+  {{- /* The image ignores ORAS_PLAIN_HTTP/ORAS_INSECURE unless DEV_MODE is true. On remote HTTPS they stay false and DEV_MODE is not turned on. Signing still follows signaturePolicy. */}}
   ALQUIMIA_OCI_DEV_MODE: {{ if or (eq (include "alquimia.registryPlainHttp" .) "true") (eq (include "alquimia.registryInsecure" .) "true") }}"true"{{ else }}"false"{{ end }}
   ALQUIMIA_OCI_SIGNATURE_POLICY: {{ .Values.runtime.zeroTrust.signaturePolicy | quote }}
   TLS_ENFORCE: {{ .Values.runtime.zeroTrust.tlsEnforce | quote }}

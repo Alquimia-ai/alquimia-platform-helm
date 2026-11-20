@@ -2,20 +2,20 @@
 {{- $runtimeAuth := .Values.keycloak.runtimeAuth | default dict }}
 {{- $studioAuth := .Values.keycloak.studioAuth | default dict }}
 {{- if and .Values.keycloak.enabled (or $ex.url $ex.service) }}
-{{- fail "keycloak.enabled instala Keycloak. Para una instancia ya existente usar enabled: false y existing.url o existing.service" }}
+{{- fail "keycloak.enabled installs Keycloak. For an existing instance use enabled: false and existing.url or existing.service" }}
 {{- end }}
 {{- if and (not .Values.keycloak.enabled) $ex.service (not $ex.url) (not $ex.namespace) }}
-{{- fail "keycloak.existing.service requiere keycloak.existing.namespace" }}
+{{- fail "keycloak.existing.service requires keycloak.existing.namespace" }}
 {{- end }}
 {{- $kcUrl := include "alquimia.keycloakUrl" . | trim }}
 {{- if and (or $runtimeAuth.enabled $studioAuth.enabled .Values.runtime.zeroTrust.enabled) (not $kcUrl) }}
-{{- fail "keycloak.runtimeAuth, keycloak.studioAuth o runtime.zeroTrust.enabled requieren keycloak.enabled, o existing.url / existing.service" }}
+{{- fail "keycloak.runtimeAuth, keycloak.studioAuth, or runtime.zeroTrust.enabled require keycloak.enabled, or existing.url / existing.service" }}
 {{- end }}
 {{- if and $studioAuth.enabled (not .Values.studio.enabled) }}
-{{- fail "keycloak.studioAuth.enabled requiere studio.enabled" }}
+{{- fail "keycloak.studioAuth.enabled requires studio.enabled" }}
 {{- end }}
 {{- if and $runtimeAuth.enabled (not .Values.runtime.enabled) }}
-{{- fail "keycloak.runtimeAuth.enabled requiere runtime.enabled" }}
+{{- fail "keycloak.runtimeAuth.enabled requires runtime.enabled" }}
 {{- end }}
 {{- if $kcUrl }}
 apiVersion: v1
@@ -40,7 +40,7 @@ data:
 {{- end }}
 {{- if .Values.keycloak.enabled }}
 {{- if not .Values.postgresql.enabled }}
-{{- fail "keycloak.enabled requiere postgresql.enabled: Keycloak usa el PostgreSQL del chart" }}
+{{- fail "keycloak.enabled requires postgresql.enabled: Keycloak uses the chart's PostgreSQL" }}
 {{- end }}
 {{- $ns := include "alquimia.namespace" . }}
 {{- $dbHost := printf "postgresql.%s.svc.cluster.local" $ns }}
@@ -361,6 +361,6 @@ spec:
       host: {{ $kcHost | quote }}
       {{- end }}
 {{- else }}
-{{- fail "keycloak.exposure debe ser route o ingress" }}
+{{- fail "keycloak.exposure must be route or ingress" }}
 {{- end }}
 {{- end }}

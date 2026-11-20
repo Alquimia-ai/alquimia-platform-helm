@@ -1,7 +1,7 @@
 {{- if .Values.spire.enabled }}
 {{- $p := .Values.spire.platform | default "auto" }}
 {{- if not (has $p (list "auto" "kubernetes" "openshift")) }}
-{{- fail "spire.platform tiene que ser auto, kubernetes u openshift" }}
+{{- fail "spire.platform must be auto, kubernetes, or openshift" }}
 {{- end }}
 apiVersion: v1
 kind: Namespace
