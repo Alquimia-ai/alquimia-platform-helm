@@ -1,13 +1,13 @@
-# Alquimia — instalación (Argo CD + Sealed Secrets)
+# Alquimia — installation (Argo CD + Sealed Secrets)
 
-Chart Helm para un único namespace. Argo CD aplica el chart; Sealed Secrets descifra las credenciales **en el cluster**. Cada cliente sella con la llave de **su** controller.
+Helm chart for a single namespace. Argo CD applies the chart; Sealed Secrets decrypts the credentials **in the cluster**. Each customer seals with the key of **their** controller.
 
-## Requisitos
+## Requirements
 
-- Cluster (OpenShift/ROSA) con **Argo CD** y el **controller de Sealed Secrets** ya instalados
-- `oc` o `kubectl` apuntando a ese cluster
+- Cluster (OpenShift/ROSA) with **Argo CD** and the **Sealed Secrets controller** already installed
+- `oc` or `kubectl` pointed at that cluster
 - `kubeseal` (CLI)
-- Repo Git que Argo pueda clonar
+- A Git repo Argo can clone
 
 ```bash
 curl -OL "https://github.com/bitnami/sealed-secrets/releases/download/v0.40.0/kubeseal-0.40.0-linux-amd64.tar.gz"
@@ -17,36 +17,36 @@ sudo install -m 755 kubeseal /usr/local/bin/kubeseal
 
 ## 1. Namespace
 
-En `chart/values.yaml` poner el Project destino, por ejemplo `alquimia-platform`.
+In `chart/values.yaml` set the destination Project, for example `alquimia-platform`.
 
-Tiene que coincidir con `spec.destination.namespace` en `argocd/application.yaml`.
+It must match `spec.destination.namespace` in `argocd/application.yaml`.
 
-Si el Project **ya existe**, el chart no lo pisa.
+If the Project **already exists**, the chart does not overwrite it.
 
-Opcional: `appsDomain` (dominio `apps.*` del cluster) o `studio.host`. Si Argo no puede leer el Ingress del cluster, conviene setear `appsDomain` para que Studio tenga la URL pública correcta.
+Optional: `appsDomain` (the cluster `apps.*` domain) or `studio.host`. If Argo cannot read the cluster Ingress, set `appsDomain` so Studio gets the correct public URL.
 
-## 2. Secretos (en claro, solo local)
+## 2. Secrets (plaintext, local only)
 
 ```bash
 ./chart/scripts/seal-secrets.sh
 ```
 
-Copia `chart/secrets/example/` → `chart/secrets/local/`. Completar los `CHANGE_ME` (MinIO, Postgres, Studio, API token, pull secret de Docker Hub, etc.).
+Copies `chart/secrets/example/` → `chart/secrets/local/`. Fill in the `CHANGE_ME` values (MinIO, Postgres, Studio, API token, Docker Hub pull secret, and so on).
 
 Pull secret: `chart/secrets/local/alquimia-dockerhub-pull/.dockerconfigjson`.
 
-**No commitear** `chart/secrets/local/` ni `sealed-cert.pem`.
+**Do not commit** `chart/secrets/local/` or `sealed-cert.pem`.
 
-No hace falta crear `alquimia-vault` ni `vault-keys`: los escribe el unsealer en el cluster.
+There is no need to create `alquimia-vault` or `vault-keys`: the unsealer writes them in the cluster.
 
-Si Argo **no puede crear ServiceAccounts**, poner `vault.serviceAccount.create: false` y aplicar el SA (y si hace falta Role + RoleBinding) de [docs/vault-unsealer-rbac.md](docs/vault-unsealer-rbac.md) por consola. El Deployment referencia el SA existente.
+If Argo **cannot create ServiceAccounts**, set `vault.serviceAccount.create: false` and apply the SA (and, if needed, the Role and RoleBinding) from [docs/vault-unsealer-rbac.md](docs/vault-unsealer-rbac.md) out of band. The Deployment references the existing SA.
 
-## 3. Sellar con la llave del cluster
+## 3. Seal with the cluster key
 
-Ajustar namespace/nombre del controller si en el cluster no es este:
+Adjust the controller namespace and name if they are different in this cluster:
 
 ```bash
-export NAMESPACE=alquimia-platform   # el mismo que values.yaml
+export NAMESPACE=alquimia-platform   # the same value as values.yaml
 
 kubeseal --fetch-cert \
   --controller-namespace sealed-secrets \
@@ -56,40 +56,40 @@ kubeseal --fetch-cert \
 ./chart/scripts/seal-secrets.sh sealed-cert.pem
 ```
 
-Eso escribe `chart/values-sealed.yaml` (cifrado para **este** namespace y **este** cert). Commitear ese archivo.
+That writes `chart/values-sealed.yaml` (encrypted for **this** namespace and **this** cert). Commit that file.
 
-Si cambian el namespace, hay que volver a sellar.
+If the namespace changes, seal again.
 
 ## 4. Argo CD
 
-Editar `argocd/application.yaml`:
+Edit `argocd/application.yaml`:
 
-- `repoURL` y `targetRevision`
-- `metadata.namespace`: donde vive Argo (`argocd` u `openshift-gitops`)
-- `destination.namespace`: el mismo que `chart/values.yaml`
+- `repoURL` and `targetRevision`
+- `metadata.namespace`: where Argo lives (`argocd` or `openshift-gitops`)
+- `destination.namespace`: the same value as `chart/values.yaml`
 
-Dejar `valueFiles: values.yaml` + `values-sealed.yaml` y los `ignoreDifferences` de `alquimia-vault` / `vault-keys`.
+Leave `valueFiles: values.yaml` + `values-sealed.yaml` and the `ignoreDifferences` for `alquimia-vault` / `vault-keys`.
 
 ```bash
 oc apply -f argocd/application.yaml
 ```
 
-Argo sincroniza solo. No hace falta `helm upgrade` en el cluster.
+Argo syncs on its own. There is no need to run `helm upgrade` on the cluster.
 
-## 5. Después del primer sync
+## 5. After the first sync
 
-1. Esperar Vault (unsealer hace init + unseal).
-2. **Respaldar** el secret `vault-keys`. Si se pierde y el PVC de Vault sigue, no hay forma de unsealar.
-3. Studio queda en `https://alquimia-studio.<appsDomain>` (o el host que hayan puesto).
+1. Wait for Vault (the unsealer runs init + unseal).
+2. **Back up** the `vault-keys` secret. If it is lost and the Vault PVC remains, there is no way to unseal.
+3. Studio is at `https://alquimia-studio.<appsDomain>` (or the host that was set).
 
-## Qué incluye el chart
+## What the chart includes
 
-| Componente | Recursos |
+| Component | Resources |
 |---|---|
 | Infra | MinIO, Kafka (KRaft), PostgreSQL, Redis, ORAS registry, Vault |
-| Runtime | ConfigMap, master, workers (SA `default` + pull secret en el pod) |
+| Runtime | ConfigMap, master, workers (SA `default` + pull secret on the pod) |
 | Studio | Deployment, Service, Route |
 
-Tabla de recursos y consumo: [docs/recursos.md](docs/recursos.md).
+Resource and usage table: [docs/resources.md](docs/resources.md).
 
-`nodeAffinity` es opcional en `values.yaml`.
+`nodeAffinity` is optional in `values.yaml`.

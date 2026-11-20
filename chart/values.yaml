@@ -1,22 +1,22 @@
-# En Argo CD se pueden sobreescribir en spec.source.helm.values / valueFiles.
+# In Argo CD these can be overridden in spec.source.helm.values / valueFiles.
 
 namespace: alquimia-platform
-# Si el Project/Namespace ya existe, el chart no lo recrea (lookup).
-# true: lo crea solo cuando falta. false: nunca lo gestiona el chart.
+# If the Project/Namespace already exists, the chart does not recreate it (lookup).
+# true: creates it only when it is missing. false: the chart never manages it.
 createNamespace: true
 
-# sealed: Argo CD aplica SealedSecret (values-sealed.yaml). Helm no crea Secrets.
-# helm: crea Secrets desde values (solo local, no GitOps).
+# sealed: Argo CD applies SealedSecret (values-sealed.yaml). Helm does not create Secrets.
+# helm: creates Secrets from values (local only, not GitOps).
 secrets:
   backend: sealed
 
 sealedSecrets: {}
 
-# Vacío: se toma de ingresses.config.openshift.io/cluster (spec.domain).
+# Empty: taken from ingresses.config.openshift.io/cluster (spec.domain).
 appsDomain: ""
 
-# Opcional. Si está vacío no se setea affinity.
-# Un componente puede sobreescribirlo con minio.nodeAffinity, kafka.nodeAffinity, etc.
+# Optional. If empty, affinity is not set.
+# A component can override it with minio.nodeAffinity, kafka.nodeAffinity, and so on.
 nodeAffinity: {}
   # requiredDuringSchedulingIgnoredDuringExecution:
   #   nodeSelectorTerms:
@@ -90,8 +90,8 @@ vault:
   keyShares: 1
   keyThreshold: 1
   keysSecret: vault-keys
-  # false: no crea el SA (p. ej. Argo no puede). Crear por consola
-  # (docs/vault-unsealer-rbac.md) y referenciarlo con name.
+  # false: does not create the SA (for example Argo cannot). Create it out of band
+  # (docs/vault-unsealer-rbac.md) and reference it with name.
   serviceAccount:
     create: true
     name: vault-unsealer
@@ -128,7 +128,7 @@ studio:
   enabled: true
   replicas: 1
   storage: 5Gi
-  # Vacío: alquimia-studio.<appsDomain> (dominio apps del cluster).
+  # Empty: alquimia-studio.<appsDomain> (the cluster apps domain).
   host: ""
   config:
     DB_STRATEGY: lite

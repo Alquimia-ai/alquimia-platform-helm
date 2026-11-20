@@ -1,5 +1,5 @@
 #!/bin/sh
-# Init + unseal continuo para GitOps. Sin {{ para no romper Helm.
+# Continuous init + unseal for GitOps. No {{ so Helm does not template this file.
 set -u
 
 VAULT_ADDR="${VAULT_ADDR:-http://vault:8200}"
@@ -31,14 +31,14 @@ health_code() {
 wait_api() {
   code="$(health_code)"
   while [ "$code" = "000" ]; do
-    log "esperando API de Vault..."
+    log "waiting for the Vault API..."
     sleep 5
     code="$(health_code)"
   done
 }
 
 extract_json_string() {
-  # extrae el valor de una clave JSON string; JSON compacto o pretty
+  # extracts a JSON string value; compact or pretty JSON
   key="$1"
   file="$2"
   tr -d '\n' < "$file" | sed -n "s/.*\"${key}\": *\"\\([^\"]*\\)\".*/\\1/p"
@@ -87,22 +87,22 @@ save_keys() {
   token_patch="{\"data\":{\"VAULT_TOKEN\":\"${tok_b64}\"}}"
   upsert_secret "$KEYS_SECRET" "$keys_post" "$keys_patch"
   upsert_secret "$TOKEN_SECRET" "$token_post" "$token_patch"
-  log "keys persistidas en ${KEYS_SECRET}; token en ${TOKEN_SECRET}"
+  log "keys stored in ${KEYS_SECRET}; token in ${TOKEN_SECRET}"
 }
 
 do_init() {
-  log "inicializando Vault (shares=${SHARES} threshold=${THRESHOLD})"
+  log "initializing Vault (shares=${SHARES} threshold=${THRESHOLD})"
   curl -sS -X PUT -H "Content-Type: application/json" \
     -d "{\"secret_shares\":${SHARES},\"secret_threshold\":${THRESHOLD}}" \
     "$VAULT_ADDR/v1/sys/init" > /tmp/init.json
   KEY=$(extract_json_string keys /tmp/init.json)
   if [ -z "$KEY" ]; then
-    # keys es un array: "keys":["valor"]
+    # keys is an array: "keys":["value"]
     KEY=$(tr -d '\n' < /tmp/init.json | sed -n 's/.*"keys":\["\([^"]*\)"\].*/\1/p')
   fi
   TOKEN=$(extract_json_string root_token /tmp/init.json)
   if [ -z "$KEY" ] || [ -z "$TOKEN" ]; then
-    log "no se pudo parsear init: $(cat /tmp/init.json)"
+    log "could not parse init: $(cat /tmp/init.json)"
     return 1
   fi
   save_keys "$KEY" "$TOKEN"
@@ -113,14 +113,14 @@ do_init() {
 do_unseal() {
   if [ -z "$UNSEAL_KEY" ]; then
     if ! load_keys; then
-      log "no hay unseal key en ${KEYS_SECRET}; no se puede unsealar"
+      log "no unseal key in ${KEYS_SECRET}; cannot unseal"
       return 1
     fi
   fi
   curl -sS -X PUT -H "Content-Type: application/json" \
     -d "{\"key\":\"${UNSEAL_KEY}\"}" \
     "$VAULT_ADDR/v1/sys/unseal" > /tmp/unseal.json || true
-  log "unseal enviado"
+  log "unseal sent"
 }
 
 while true; do
@@ -141,7 +141,7 @@ while true; do
       do_unseal || true
       ;;
     *)
-      log "codigo de health inesperado"
+      log "unexpected health code"
       ;;
   esac
   sleep 10
