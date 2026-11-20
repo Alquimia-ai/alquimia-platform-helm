@@ -119,8 +119,8 @@ subjects:
     name: spire-agent
     namespace: {{ $ns }}
 ---
-# En OpenShift ata el SCC privileged. En Kubernetes y EKS el ClusterRole no
-# existe y el binding no otorga nada.
+# On OpenShift this binds the privileged SCC. On Kubernetes and EKS the ClusterRole
+# does not exist and the binding grants nothing.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:

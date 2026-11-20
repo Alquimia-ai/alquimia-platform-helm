@@ -1,6 +1,6 @@
 {{- if .Values.studio.enabled }}
 {{- if and .Values.otel.enabled (not .Values.otel.endpoint) }}
-{{- fail "otel.enabled requiere otel.endpoint (URL base OTLP HTTP del collector)" }}
+{{- fail "otel.enabled requires otel.endpoint (OTLP HTTP base URL of the collector)" }}
 {{- end }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -130,7 +130,7 @@ spec:
         - name: alquimia-studio
           image: {{ .Values.images.studio | quote }}
           imagePullPolicy: Always
-          # Imagen hace chown+su-exec a nextjs; en OpenShift el UID aleatorio no puede.
+          # The image does chown+su-exec to nextjs; on OpenShift the random UID cannot.
           command:
             - /bin/sh
             - -c
@@ -143,8 +143,8 @@ spec:
             - name: NEDB_DATA_DIR
               value: /app/.data
             {{- if ne (include "alquimia.runtimeKeycloak" .) "true" }}
-            # El runtime con API_TOKEN rechaza cualquier otra credencial.
-            # env pisa el valor que venga en alquimia-studio-secrets.
+            # The runtime with API_TOKEN rejects any other credential.
+            # env overrides whatever comes from alquimia-studio-secrets.
             - name: ALQUIMIA_ASSISTANT_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -196,7 +196,7 @@ spec:
 {{- $host := include "alquimia.studioHost" . | trim }}
 {{- if eq $exposure "ingress" }}
 {{- if not $host }}
-{{- fail "studio.exposure ingress requiere studio.host" }}
+{{- fail "studio.exposure ingress requires studio.host" }}
 {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -255,6 +255,6 @@ spec:
     insecureEdgeTerminationPolicy: Redirect
   wildcardPolicy: None
 {{- else if ne $exposure "cluster" }}
-{{- fail "studio.exposure tiene que ser cluster, ingress o route" }}
+{{- fail "studio.exposure must be cluster, ingress, or route" }}
 {{- end }}
 {{- end }}

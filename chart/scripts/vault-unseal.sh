@@ -1,5 +1,5 @@
 #!/bin/sh
-# Init + unseal continuo para GitOps. Sin {{ para no romper Helm.
+# Continuous init + unseal for GitOps. No {{ so Helm does not template this file.
 set -u
 
 VAULT_ADDR="${VAULT_ADDR:-http://vault:8200}"
@@ -38,14 +38,14 @@ health_code() {
 wait_api() {
   code="$(health_code)"
   while [ "$code" = "000" ]; do
-    log "esperando API de Vault..."
+    log "waiting for the Vault API..."
     sleep 5
     code="$(health_code)"
   done
 }
 
 extract_json_string() {
-  # extrae el valor de una clave JSON string; JSON compacto o pretty
+  # extracts a JSON string value; compact or pretty JSON
   key="$1"
   file="$2"
   tr -d '\n' < "$file" | sed -n "s/.*\"${key}\": *\"\\([^\"]*\\)\".*/\\1/p"
@@ -95,14 +95,14 @@ save_keys() {
   upsert_secret "$KEYS_SECRET" "$keys_post" "$keys_patch"
   if [ "${WRITE_TOKEN_SECRET:-true}" = "true" ]; then
     upsert_secret "$TOKEN_SECRET" "$token_post" "$token_patch"
-    log "keys persistidas en ${KEYS_SECRET}; token en ${TOKEN_SECRET}"
+    log "keys stored in ${KEYS_SECRET}; token in ${TOKEN_SECRET}"
   else
-    log "keys persistidas en ${KEYS_SECRET}"
+    log "keys stored in ${KEYS_SECRET}"
   fi
 }
 
 enable_kv() {
-  # KV v2 en secret/. Cubbyhole es por token: master y worker no comparten lo escrito ahí.
+  # KV v2 at secret/. Cubbyhole is per token: master and worker do not share what is written there.
   code=$(curl -sS -o /tmp/vault-kv-get.json -w "%{http_code}" \
     -H "X-Vault-Token: ${ROOT_TOKEN}" \
     "${VAULT_ADDR}/v1/sys/mounts/secret" || printf '000')
@@ -110,32 +110,32 @@ enable_kv() {
     return 0
   fi
   if [ "$code" = "200" ]; then
-    log "el mount secret existe y no es kv v2"
+    log "the secret mount exists and is not kv v2"
     return 1
   fi
   code=$(vault_api POST /v1/sys/mounts/secret '{"type":"kv","options":{"version":"2"}}' /tmp/vault-kv.json)
   if [ "$code" = "204" ] || [ "$code" = "200" ]; then
-    log "kv v2 montado en secret/"
+    log "kv v2 mounted at secret/"
     return 0
   fi
-  log "kv v2 fallo http=${code}"
+  log "kv v2 failed http=${code}"
   cat /tmp/vault-kv.json 2>/dev/null || true
   return 1
 }
 
 do_init() {
-  log "inicializando Vault (shares=${SHARES} threshold=${THRESHOLD})"
+  log "initializing Vault (shares=${SHARES} threshold=${THRESHOLD})"
   curl -sS -X PUT -H "Content-Type: application/json" \
     -d "{\"secret_shares\":${SHARES},\"secret_threshold\":${THRESHOLD}}" \
     "$VAULT_ADDR/v1/sys/init" > /tmp/init.json
   KEY=$(extract_json_string keys /tmp/init.json)
   if [ -z "$KEY" ]; then
-    # keys es un array: "keys":["valor"]
+    # keys is an array: "keys":["value"]
     KEY=$(tr -d '\n' < /tmp/init.json | sed -n 's/.*"keys":\["\([^"]*\)"\].*/\1/p')
   fi
   TOKEN=$(extract_json_string root_token /tmp/init.json)
   if [ -z "$KEY" ] || [ -z "$TOKEN" ]; then
-    log "no se pudo parsear init: $(cat /tmp/init.json)"
+    log "could not parse init: $(cat /tmp/init.json)"
     return 1
   fi
   save_keys "$KEY" "$TOKEN"
@@ -146,14 +146,14 @@ do_init() {
 do_unseal() {
   if [ -z "$UNSEAL_KEY" ]; then
     if ! load_keys; then
-      log "no hay unseal key en ${KEYS_SECRET}; no se puede unsealar"
+      log "no unseal key in ${KEYS_SECRET}; cannot unseal"
       return 1
     fi
   fi
   curl -sS -X PUT -H "Content-Type: application/json" \
     -d "{\"key\":\"${UNSEAL_KEY}\"}" \
     "$VAULT_ADDR/v1/sys/unseal" > /tmp/unseal.json || true
-  log "unseal enviado"
+  log "unseal sent"
 }
 
 json_escape() {
@@ -198,12 +198,12 @@ path "database/creds/alquimia-runtime-master" {
 path "sys/policies/acl/as-*" {
   capabilities = ["create", "read", "update", "delete", "list", "sudo"]
 }
-# hvac list_policies() hace GET /v1/sys/policy. El glob as-* no cubre ese listado.
+# hvac list_policies() does GET /v1/sys/policy. The as-* glob does not cover that list.
 path "sys/policy" {
   capabilities = ["read"]
 }
-# hvac create_or_update_policy() hace PUT /v1/sys/policy/<nombre>. Escribir
-# políticas exige sudo.
+# hvac create_or_update_policy() does PUT /v1/sys/policy/<name>. Writing
+# policies requires sudo.
 path "sys/policy/as-*" {
   capabilities = ["create", "read", "update", "delete", "list", "sudo"]
 }
@@ -251,17 +251,17 @@ apply_runtime_policies() {
       "{\"policy\":\"${policy_json}\"}" \
       /tmp/vault-policy.json)
     if [ "$code" != "204" ] && [ "$code" != "200" ]; then
-      log "policy ${name} fallo http=${code}"
+      log "policy ${name} failed http=${code}"
       return 1
     fi
   done
 }
 
 refresh_k8s_reviewer() {
-  # Vault guarda una copia del JWT. El del pod rota; si no se vuelve a
-  # escribir, TokenReview falla y el login kubernetes responde permission denied.
+  # Vault stores a copy of the JWT. The pod's token rotates; if it is not
+  # written again, TokenReview fails and the kubernetes login returns permission denied.
   if [ -z "$ROOT_TOKEN" ] && ! load_keys; then
-    log "kubernetes reviewer: no hay root token"
+    log "kubernetes reviewer: no root token"
     return 1
   fi
   sum=$(cksum "$SA_TOKEN_PATH" | awk '{print $1}')
@@ -275,11 +275,11 @@ refresh_k8s_reviewer() {
     "{\"kubernetes_host\":\"https://kubernetes.default.svc\",\"kubernetes_ca_cert\":\"${ca_json}\",\"token_reviewer_jwt\":\"${jwt_json}\"}" \
     /tmp/vault-auth-config.json)
   if [ "$code" != "204" ] && [ "$code" != "200" ]; then
-    log "kubernetes reviewer fallo http=${code}"
+    log "kubernetes reviewer failed http=${code}"
     return 1
   fi
   printf '%s' "$sum" > /tmp/k8s-reviewer.sum
-  log "kubernetes reviewer actualizado"
+  log "kubernetes reviewer updated"
 }
 
 configure_k8s_auth() {
@@ -292,13 +292,13 @@ configure_k8s_auth() {
     return 0
   fi
   if [ -z "$ROOT_TOKEN" ] && ! load_keys; then
-    log "kubernetes auth: no hay root token"
+    log "kubernetes auth: no root token"
     return 1
   fi
 
   code=$(vault_api POST /v1/sys/auth/kubernetes '{"type":"kubernetes"}' /tmp/vault-auth-enable.json)
   if [ "$code" != "204" ] && [ "$code" != "200" ] && [ "$code" != "400" ]; then
-    log "kubernetes auth enable fallo http=${code}"
+    log "kubernetes auth enable failed http=${code}"
     return 1
   fi
 
@@ -306,7 +306,7 @@ configure_k8s_auth() {
 
   code=$(vault_api POST /v1/sys/auth/jwt '{"type":"jwt"}' /tmp/vault-jwt-enable.json)
   if [ "$code" != "204" ] && [ "$code" != "200" ] && [ "$code" != "400" ]; then
-    log "jwt auth enable fallo http=${code}"
+    log "jwt auth enable failed http=${code}"
     return 1
   fi
   if [ -n "${JWT_OIDC_DISCOVERY_URL:-}" ]; then
@@ -315,7 +315,7 @@ configure_k8s_auth() {
       "{\"oidc_discovery_url\":\"${issuer_json}\",\"bound_issuer\":\"${issuer_json}\",\"jwt_supported_algs\":[\"RS256\",\"ES256\",\"ES384\"]}" \
       /tmp/vault-jwt-config.json)
     if [ "$code" != "204" ] && [ "$code" != "200" ]; then
-      log "jwt auth config fallo http=${code}"
+      log "jwt auth config failed http=${code}"
       cat /tmp/vault-jwt-config.json 2>/dev/null || true
       return 1
     fi
@@ -327,13 +327,13 @@ configure_k8s_auth() {
       "{\"bound_service_account_names\":\"alquimia-runtime-sa\",\"bound_service_account_namespaces\":\"${NS}\",\"policies\":\"${name}\",\"ttl\":\"1h\",\"audience\":\"vault\"}" \
       /tmp/vault-role.json)
     if [ "$code" != "204" ] && [ "$code" != "200" ]; then
-      log "role ${name} fallo http=${code}"
+      log "role ${name} failed http=${code}"
       return 1
     fi
   done
 
   touch /tmp/k8s-auth.ok
-  log "auth listo: kubernetes y jwt en ${NS}"
+  log "auth ready: kubernetes and jwt in ${NS}"
 }
 
 while true; do
@@ -345,8 +345,8 @@ while true; do
     200|429|472|473)
       if load_keys; then
         save_keys "$UNSEAL_KEY" "$ROOT_TOKEN"
-        # KV v2 lo usa el runtime con y sin Zero Trust. Si falla, el HTTP
-        # queda en el log y no se sigue: el proximo ciclo reintenta.
+        # The runtime uses KV v2 with and without Zero Trust. On failure the HTTP
+        # stays in the log and setup does not continue: the next cycle retries.
         if enable_kv; then
           configure_k8s_auth || true
         fi
@@ -360,7 +360,7 @@ while true; do
       do_unseal || true
       ;;
     *)
-      log "codigo de health inesperado"
+      log "unexpected health code"
       ;;
   esac
   sleep 10

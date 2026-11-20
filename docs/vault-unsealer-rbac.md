@@ -1,8 +1,8 @@
-# RBAC de vault-unsealer
+# vault-unsealer RBAC
 
-Cuando Argo CD no tiene permiso para crear ServiceAccounts, el ServiceAccount se crea de forma previa y el chart solo lo referencia.
+When Argo CD is not allowed to create ServiceAccounts, the ServiceAccount is created ahead of time and the chart only references it.
 
-En `chart/values.yaml`:
+In `chart/values.yaml`:
 
 ```yaml
 vault:
@@ -12,13 +12,13 @@ vault:
     name: vault-unsealer
 ```
 
-Con `create: false` el chart omite el ServiceAccount. El Deployment utiliza `serviceAccountName` con el nombre indicado. Role y RoleBinding los aplica Argo CD, o pueden aplicarse con el manifiesto siguiente.
+With `create: false` the chart skips the ServiceAccount. The Deployment uses `serviceAccountName` with the given name. Argo CD applies the Role and RoleBinding, or they can be applied with the manifest below.
 
-## Aplicación
+## Apply
 
-Sustituir `NAMESPACE` por el valor de `namespace` en `values.yaml`. El valor por defecto es `alquimia-platform`.
+Replace `NAMESPACE` with the `namespace` value in `values.yaml`. The default is `alquimia-platform`.
 
-Si `vault.keysSecret` cambia, actualizar `resourceNames` del Role.
+If `vault.keysSecret` changes, update the Role's `resourceNames`.
 
 ```bash
 oc apply -f - <<'EOF'
@@ -66,11 +66,11 @@ subjects:
 EOF
 ```
 
-## Qué permite
+## What it allows
 
-| Recurso | Verbos | Motivo |
+| Resource | Verbs | Reason |
 |---|---|---|
-| `secrets` | `create` | Crear `vault-keys` y `alquimia-vault` durante el init |
-| `secrets` (`vault-keys`, `alquimia-vault`) | `get`, `update`, `patch` | Leer las claves, persistir el root token y actualizar las unseal keys |
+| `secrets` | `create` | Create `vault-keys` and `alquimia-vault` during init |
+| `secrets` (`vault-keys`, `alquimia-vault`) | `get`, `update`, `patch` | Read the keys, store the root token, and update the unseal keys |
 
-El permiso queda limitado al namespace de la instalación.
+The permission is limited to the installation namespace.

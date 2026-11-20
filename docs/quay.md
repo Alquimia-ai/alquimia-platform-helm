@@ -1,21 +1,21 @@
 # Quay
 
-El chart no instala Quay. Con `registry.mode: remote` el runtime publica y lee en un Quay que ya existe, y deja de desplegar el registry local (`oras-registry`). La integración se contrastó con Quay 3.18.
+The chart does not install Quay. With `registry.mode: remote` the runtime publishes to and reads from a Quay that already exists, and stops deploying the local registry (`oras-registry`). The integration was checked against Quay 3.18.
 
-El hostname de esta guía es de referencia. Sustituir `registry.acme.example` por el del entorno. El token del robot no forma parte del repositorio.
+The hostname in this guide is an example. Replace `registry.acme.example` with the environment's. The robot token is not part of the repository.
 
-## Qué tiene que existir en Quay
+## What must already exist in Quay
 
-Dos organizaciones, con los mismos nombres que usa el chart:
+Two organizations, with the same names the chart uses:
 
-| Organización | Parámetro | Variable del runtime |
+| Organization | Parameter | Runtime variable |
 |---|---|---|
 | `agents` | `studio.config.EXTERNAL_REGISTRY_AGENTS_PROJECT` | `ALQUIMIA_OCI_NAMESPACE_AGENTSPACES` |
 | `brains` | `studio.config.EXTERNAL_REGISTRY_BRAINS_PROJECT` | `ALQUIMIA_OCI_NAMESPACE_BRAINS` |
 
-El chart copia esos dos valores de Studio al ConfigMap `alquimia-config`. Si se renombran, hay que cambiarlos en Studio: el runtime no tiene un parámetro propio.
+The chart copies those two Studio values into the `alquimia-config` ConfigMap. If they are renamed, change them in Studio: the runtime has no parameter of its own.
 
-Cada publish escribe el artefacto en su repositorio (`agents/probe`) y, con el índice activo, una entrada en el ancla del namespace (`agents/index` o `brains/index`). Esas anclas las crea el runtime. No son artefactos de usuario. Studio lista el catálogo leyendo el ancla, no con `/v2/_catalog`.
+Each publish writes the artifact to its repository (`agents/probe`) and, with the index enabled, an entry on the namespace anchor (`agents/index` or `brains/index`). The runtime creates those anchors. They are not user artifacts. Studio lists the catalog by reading the anchor, not with `/v2/_catalog`.
 
 ## Overlay
 
@@ -36,30 +36,30 @@ studio:
     EXTERNAL_REGISTRY_BRAINS_PROJECT: brains
 ```
 
-`registry.host` queda en `ALQUIMIA_OCI_REGISTRY_DEFAULT`. `studio.config.EXTERNAL_REGISTRY_URL` y `registry.public.host` llevan el mismo hostname: es el que Studio muestra al usuario.
+`registry.host` is written to `ALQUIMIA_OCI_REGISTRY_DEFAULT`. `studio.config.EXTERNAL_REGISTRY_URL` and `registry.public.host` carry the same hostname: that is the one Studio shows the user.
 
-`registry.host` va sin esquema y sin ruta. `https://registry.acme.example` no es un host válido para el chart.
+`registry.host` has no scheme and no path. `https://registry.acme.example` is not a valid host for the chart.
 
-Con HTTPS, `plainHttp` e `insecure` quedan en `false`. El chart no emite una CA para un registry remoto: Quay presenta su propio certificado y el runtime lo verifica.
+With HTTPS, `plainHttp` and `insecure` stay `false`. The chart does not issue a CA for a remote registry: Quay presents its own certificate and the runtime verifies it.
 
 ## Robot account
 
-El runtime autentica con una robot account. El usuario de Quay tiene la forma `<organización>+<nombre>`, por ejemplo `agents+runtime`. La contraseña es el token del robot.
+The runtime authenticates with a robot account. The Quay username has the form `<organization>+<name>`, for example `agents+runtime`. The password is the robot token.
 
-Un robot nace en una organización. Para publicar también en la otra, se agrega ese mismo robot a un team de la segunda. El chart guarda una sola credencial por hostname: un segundo robot contra el mismo Quay no entra en el Secret.
+A robot is created in one organization. To publish to the other as well, add that same robot to a team in the second organization. The chart stores one credential per hostname: a second robot against the same Quay does not fit in the Secret.
 
-Permisos mínimos en cada organización:
+Minimum permissions in each organization:
 
-| Dónde | Rol | Para qué alcanza |
+| Where | Role | What it covers |
 |---|---|---|
-| Team de la organización | `creator` | Crear repositorios. Quay deja al robot como admin de los que él crea, incluidas las anclas `agents/index` y `brains/index` |
-| Repositorio que ya existía y creó otro usuario | `write` | Push y pull de ese repositorio. `creator` no abre los repos privados ajenos |
+| Organization team | `creator` | Create repositories. Quay makes the robot admin of the ones it creates, including the `agents/index` and `brains/index` anchors |
+| Repository that already existed and was created by another user | `write` | Push and pull of that repository. `creator` does not open other users' private repos |
 
-`owner` de la organización no hace falta.
+Organization `owner` is not required.
 
-## Credencial en el chart
+## Credential in the chart
 
-El Secret se llama `alquimia-registry-config`, tipo `kubernetes.io/dockerconfigjson`. El master y los workers montan la clave `.dockerconfigjson` en `/var/docker-config/config.json` y definen `DOCKER_CONFIG=/var/docker-config`. ORAS lee ese archivo.
+The Secret is named `alquimia-registry-config`, type `kubernetes.io/dockerconfigjson`. The master and the workers mount the `.dockerconfigjson` key at `/var/docker-config/config.json` and set `DOCKER_CONFIG=/var/docker-config`. ORAS reads that file.
 
 ### `secrets.backend: helm`
 
@@ -67,39 +67,39 @@ El Secret se llama `alquimia-registry-config`, tipo `kubernetes.io/dockerconfigj
 registry:
   dockerconfig:
     username: agents+runtime
-    password: token-del-robot
+    password: robot-token
 ```
 
-Ese usuario y esa contraseña son los que quedan para `registry.host`. Si `registry.public.host` es otro hostname y trae usuario y contraseña, el chart agrega una segunda entrada. Si es el mismo hostname, permanece la de `registry.dockerconfig`.
+That username and password are the ones stored for `registry.host`. If `registry.public.host` is a different hostname and has a username and password, the chart adds a second entry. If it is the same hostname, the `registry.dockerconfig` entry stays.
 
-Sin usuario o sin contraseña en `registry.dockerconfig`, el chart crea el Secret con `{"auths":{}}`. ORAS llama a Quay sin credencial.
+Without a username or without a password in `registry.dockerconfig`, the chart creates the Secret with `{"auths":{}}`. ORAS calls Quay without a credential.
 
 ### `secrets.backend: sealed`
 
-El chart no arma este Secret desde `registry.dockerconfig`. Hay que dejar el JSON en `chart/secrets/local/alquimia-registry-config/.dockerconfigjson` y sellarlo con `chart/scripts/seal-secrets.sh`. La clave del host es el mismo valor que `registry.host`:
+The chart does not build this Secret from `registry.dockerconfig`. Put the JSON in `chart/secrets/local/alquimia-registry-config/.dockerconfigjson` and seal it with `chart/scripts/seal-secrets.sh`. The host key is the same value as `registry.host`:
 
 ```json
 {
   "auths": {
     "registry.acme.example": {
       "username": "agents+runtime",
-      "password": "token-del-robot"
+      "password": "robot-token"
     }
   }
 }
 ```
 
-`chart/secrets/local/` no se commitea. Si ese SealedSecret no está y tampoco hay usuario y contraseña de helm, el chart igual crea `alquimia-registry-config` vacío.
+`chart/secrets/local/` is not committed. If that SealedSecret is missing and there is also no Helm username and password, the chart still creates an empty `alquimia-registry-config`.
 
-## Índice
+## Index
 
-`runtime.config.ALQUIMIA_OCI_INDEX_ENABLED` sale en `true`. Después de un push correcto, el runtime adjunta la entrada al ancla del namespace. Con `false` el artefacto queda en su repositorio y el catálogo no lo muestra.
+`runtime.config.ALQUIMIA_OCI_INDEX_ENABLED` renders as `true`. After a successful push, the runtime attaches the entry to the namespace anchor. With `false` the artifact stays in its repository and the catalog does not show it.
 
-`ALQUIMIA_OCI_REFERRERS_FALLBACK` sale en `error`. El attach exige la API nativa de referrers de OCI 1.1 (`GET /v2/<namespace>/index/referrers/<digest>`). Quay 3.18 la expone. Si esa sonda falla, el artefacto sigue publicado y la entrada del índice no: el runtime lo deja en el log y no reescribe el tag mutable de ORAS. `warn` hace ese attach igual y puede perder entradas cuando dos publish corren a la vez.
+`ALQUIMIA_OCI_REFERRERS_FALLBACK` renders as `error`. The attach requires the native OCI 1.1 referrers API (`GET /v2/<namespace>/index/referrers/<digest>`). Quay 3.18 exposes it. If that probe fails, the artifact stays published and the index entry does not: the runtime records it in the log and does not rewrite ORAS's mutable tag. `warn` still performs that attach and can drop entries when two publishes run at the same time.
 
-## Quay en HTTP
+## Quay over HTTP
 
-Solo cuando el Ingress de Quay no termina TLS:
+Only when the Quay Ingress does not terminate TLS:
 
 ```yaml
 registry:
@@ -113,17 +113,17 @@ runtime:
     ALQUIMIA_OCI_DEV_MODE: "true"
 ```
 
-La imagen ignora `ORAS_PLAIN_HTTP` si `ALQUIMIA_OCI_DEV_MODE` no es `true`. Con `plainHttp: true` el chart deja pasar el valor de `runtime.config.ALQUIMIA_OCI_DEV_MODE`; el default de ese valor es `false`, así que hay que ponerlo en `true`. Con HTTPS el chart fuerza `ALQUIMIA_OCI_DEV_MODE=false`.
+The image ignores `ORAS_PLAIN_HTTP` unless `ALQUIMIA_OCI_DEV_MODE` is `true`. With `plainHttp: true` the chart passes through `runtime.config.ALQUIMIA_OCI_DEV_MODE`; that value defaults to `false`, so it has to be set to `true`. With HTTPS the chart forces `ALQUIMIA_OCI_DEV_MODE=false`.
 
-`insecure: true` salta la verificación TLS. No sustituye a `plainHttp`.
+`insecure: true` skips TLS verification. It does not replace `plainHttp`.
 
-## Qué revisar si no aparece nada en Quay
+## What to check if nothing shows up in Quay
 
-El push del artefacto y el attach al índice son dos pasos. Un repo `agents/probe` vacío puede existir sin tags: alguien lo creó, o el runtime lo creó, y el push del manifiesto no llegó.
+The artifact push and the index attach are two steps. An empty `agents/probe` repo can exist without tags: someone created it, or the runtime created it, and the manifest push never arrived.
 
-| Síntoma | Causa |
+| Symptom | Cause |
 |---|---|
-| `HEAD /v2/...` responde 401 y el Secret tiene `{"auths":{}}` | ORAS no tiene usuario. Falta el robot en `alquimia-registry-config`, o el host del JSON no es exactamente `registry.host` |
-| 401 con el robot cargado, sobre un repo que creó otro usuario | El team está en `creator` y ese repo no le pertenece. Hace falta rol `write` en el repositorio |
-| El tag del artefacto existe y `agents/index` sigue vacío | `ALQUIMIA_OCI_INDEX_ENABLED` está en `false`, o la sonda de referrers falló con `ALQUIMIA_OCI_REFERRERS_FALLBACK=error` |
-| `oras discover .../agents/index:v1` responde `not found` | El ancla todavía no se escribió. Es el estado anterior al primer publish con el índice activo |
+| `HEAD /v2/...` returns 401 and the Secret has `{"auths":{}}` | ORAS has no username. The robot is missing from `alquimia-registry-config`, or the JSON host is not exactly `registry.host` |
+| 401 with the robot loaded, on a repo another user created | The team is `creator` and that repo does not belong to it. The repository needs the `write` role |
+| The artifact tag exists and `agents/index` is still empty | `ALQUIMIA_OCI_INDEX_ENABLED` is `false`, or the referrers probe failed with `ALQUIMIA_OCI_REFERRERS_FALLBACK=error` |
+| `oras discover .../agents/index:v1` returns `not found` | The anchor has not been written yet. That is the state before the first publish with the index enabled |

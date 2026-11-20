@@ -1,22 +1,22 @@
-# Alquimia — chart de instalación
+# Alquimia — installation chart
 
-Chart Helm de un namespace para Kubernetes, OpenShift y EKS. Los dominios de esta guía son de referencia (`acme.example`) y se sustituyen por los del entorno. Las credenciales y la clave privada de cosign no forman parte del repositorio.
+Helm chart for one namespace on Kubernetes, OpenShift, and EKS. The domains in this guide are examples (`acme.example`) and are replaced with the environment's own. Credentials and the cosign private key are not part of the repository.
 
-Qué se despliega y cuánto pide: [docs/recursos.md](docs/recursos.md).
+What gets deployed and how much it requests: [docs/resources.md](docs/resources.md).
 
-Parámetros de la instalación: [docs/configuracion.md](docs/configuracion.md).
+Installation parameters: [docs/configuration.md](docs/configuration.md).
 
-Firma OCI: [docs/cosign.md](docs/cosign.md).
+OCI signing: [docs/cosign.md](docs/cosign.md).
 
-Registry Quay: [docs/quay.md](docs/quay.md).
+Quay registry: [docs/quay.md](docs/quay.md).
 
-## Requisitos
+## Requirements
 
-- Cluster con `kubectl` o `oc`
-- Helm 3, o Argo CD
-- Namespace creado antes del install (`helm --create-namespace` o uno que ya exista). El chart no lo administra: si el release lo posee, un upgrade posterior puede borrarlo
-- Para secretos sellados: controller de Sealed Secrets y `kubeseal`
-- Para Zero Trust: los privilegios de nodo que pide SPIRE (el runtime en sí queda restringido y usa el socket por CSI)
+- Cluster with `kubectl` or `oc`
+- Helm 3, or Argo CD
+- Namespace created before install (`helm --create-namespace`, or one that already exists). The chart does not manage it: if the release owns it, a later upgrade can delete it
+- For sealed secrets: Sealed Secrets controller and `kubeseal`
+- For Zero Trust: the node privileges SPIRE requires (the runtime itself stays restricted and uses the socket through CSI)
 
 ```bash
 curl -OL "https://github.com/bitnami/sealed-secrets/releases/download/v0.40.0/kubeseal-0.40.0-linux-amd64.tar.gz"
@@ -24,39 +24,39 @@ tar -xzf kubeseal-0.40.0-linux-amd64.tar.gz kubeseal
 sudo install -m 755 kubeseal /usr/local/bin/kubeseal
 ```
 
-## Valores
+## Values
 
-`chart/values.yaml` es el perfil base, sin credenciales. La instalación lo combina con un archivo de values privado o con `chart/values-sealed.yaml`.
+`chart/values.yaml` is the base profile, without credentials. The installation combines it with a private values file or with `chart/values-sealed.yaml`.
 
-El namespace de ejemplo del chart es `alquimia-platform`. Tiene que coincidir con `spec.destination.namespace` de `argocd/application.yaml`.
+The chart's example namespace is `alquimia-platform`. It must match `spec.destination.namespace` in `argocd/application.yaml`.
 
-Hosts de ejemplo:
+Example hosts:
 
-| Superficie | Host |
+| Surface | Host |
 |---|---|
 | Runtime | `api.acme.example` |
 | Studio | `studio.acme.example` |
-| Keycloak existente | `https://auth.acme.example` |
-| Registry público | `registry.acme.example` |
-| Trust domain SPIFFE | `acme.example` |
+| Existing Keycloak | `https://auth.acme.example` |
+| Public registry | `registry.acme.example` |
+| SPIFFE trust domain | `acme.example` |
 
-## Instalación con Helm
+## Install with Helm
 
 ```bash
 helm upgrade --install alquimia chart \
   --namespace acme \
   --create-namespace \
   -f chart/values.yaml \
-  -f values-instalacion.yaml
+  -f values-install.yaml
 ```
 
-`values-instalacion.yaml` define los dominios, `secrets.backend: helm` y las credenciales. Permanece fuera del repositorio.
+`values-install.yaml` sets the domains, `secrets.backend: helm`, and the credentials. It stays outside the repository.
 
-## Instalación con Argo CD y Sealed Secrets
+## Install with Argo CD and Sealed Secrets
 
-1. Copiar `chart/secrets/example/` a `chart/secrets/local/` y completar los `CHANGE_ME`. El pull secret es `chart/secrets/local/alquimia-dockerhub-pull/.dockerconfigjson`.
-2. No crear `alquimia-vault` ni `vault-keys`: los escribe el unsealer. No commitear `chart/secrets/local/` ni `sealed-cert.pem`.
-3. Sellar con el certificado de **ese** cluster y **ese** namespace:
+1. Copy `chart/secrets/example/` to `chart/secrets/local/` and fill in the `CHANGE_ME` values. The pull secret is `chart/secrets/local/alquimia-dockerhub-pull/.dockerconfigjson`.
+2. Do not create `alquimia-vault` or `vault-keys`: the unsealer writes them. Do not commit `chart/secrets/local/` or `sealed-cert.pem`.
+3. Seal with the certificate of **that** cluster and **that** namespace:
 
 ```bash
 export NAMESPACE=acme
@@ -69,25 +69,25 @@ kubeseal --fetch-cert \
 ./chart/scripts/seal-secrets.sh sealed-cert.pem
 ```
 
-Eso genera `chart/values-sealed.yaml`. Si cambia el namespace, hay que sellar de nuevo.
+That generates `chart/values-sealed.yaml`. If the namespace changes, seal again.
 
-4. En `argocd/application.yaml`: `repoURL`, `targetRevision`, el namespace de Argo y `destination.namespace`. Dejar `valueFiles` en `values.yaml` más `values-sealed.yaml`.
+4. In `argocd/application.yaml`: `repoURL`, `targetRevision`, the Argo namespace, and `destination.namespace`. Leave `valueFiles` as `values.yaml` plus `values-sealed.yaml`.
 
 ```bash
 kubectl apply -f argocd/application.yaml
 ```
 
-El perfil Zero Trust sin Sealed Secrets usa `chart/values-zt.yaml` en lugar de `values-sealed.yaml`. Los Secret los crea Helm.
+The Zero Trust profile without Sealed Secrets uses `chart/values-zt.yaml` instead of `values-sealed.yaml`. Helm creates the Secrets.
 
-Si Argo no puede crear ServiceAccounts, ver [docs/vault-unsealer-rbac.md](docs/vault-unsealer-rbac.md).
+If Argo cannot create ServiceAccounts, see [docs/vault-unsealer-rbac.md](docs/vault-unsealer-rbac.md).
 
-## Después del primer sync
+## After the first sync
 
-1. Esperar a que el unsealer deje Vault abierto.
-2. Respaldar el Secret `vault-keys` fuera del cluster.
-3. Studio responde en `https://studio.acme.example` (o en `https://alquimia-studio.<appsDomain>` si `studio.host` quedó vacío y la exposición es Route).
-4. Con `keycloak.enabled: false`, Keycloak no se instala: `keycloak.existing.url` (por ejemplo `https://auth.acme.example`) queda en el ConfigMap `keycloak-config`.
-5. `runtime.zeroTrust.enabled: false` deja el runtime con `API_TOKEN`, Kafka en claro y la firma OCI apagada. `true` usa Keycloak, SPIFFE y `ALQUIMIA_OCI_SIGNATURE_POLICY=required`. Los OCI públicos tienen que estar firmados con la clave de `runtime.cosign.publicKey`.
-6. Qdrant es obligatorio. El chart lo despliega y apunta el runtime a ese servicio.
+1. Wait until the unsealer leaves Vault unsealed.
+2. Back up the `vault-keys` Secret outside the cluster.
+3. Studio answers at `https://studio.acme.example` (or at `https://alquimia-studio.<appsDomain>` if `studio.host` was left empty and exposure is Route).
+4. With `keycloak.enabled: false`, Keycloak is not installed: `keycloak.existing.url` (for example `https://auth.acme.example`) is written to the `keycloak-config` ConfigMap.
+5. `runtime.zeroTrust.enabled: false` leaves the runtime on `API_TOKEN`, Kafka in the clear, and OCI signing off. `true` uses Keycloak, SPIFFE, and `ALQUIMIA_OCI_SIGNATURE_POLICY=required`. Public OCI artifacts must be signed with the key in `runtime.cosign.publicKey`.
+6. Qdrant is required. The chart deploys it and points the runtime at that service.
 
-`nodeAffinity` es opcional. `otel.enabled` exporta al collector de `otel.endpoint`. `kyverno.enabled` (por defecto `false`) exige que Kyverno ya esté instalado.
+`nodeAffinity` is optional. `otel.enabled` exports to the collector at `otel.endpoint`. `kyverno.enabled` (default `false`) requires Kyverno to already be installed.

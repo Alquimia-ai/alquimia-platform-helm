@@ -119,7 +119,7 @@ true
 {{- define "alquimia.registryMode" -}}
 {{- $mode := .Values.registry.mode | default "local" -}}
 {{- if not (or (eq $mode "local") (eq $mode "remote")) -}}
-{{- fail "registry.mode tiene que ser local o remote" -}}
+{{- fail "registry.mode must be local or remote" -}}
 {{- end -}}
 {{- $mode -}}
 {{- end }}
@@ -154,7 +154,7 @@ true
 {{- if eq (include "alquimia.registryMode" .) "remote" -}}
 {{- $host := .Values.registry.host | default "" | trim -}}
 {{- if not $host -}}
-{{- fail "registry.mode remote requiere registry.host (por ejemplo registry.acme.example)" -}}
+{{- fail "registry.mode remote requires registry.host (for example registry.acme.example)" -}}
 {{- end -}}
 {{- $host -}}
 {{- else -}}

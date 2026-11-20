@@ -1,65 +1,65 @@
 # Cosign
 
-El runtime verifica la firma de cada artefacto OCI que obtiene y, si el overlay trae la clave privada, también firma lo que publica. La clave pública vive en el ConfigMap `alquimia-cosign`. La privada, cuando se indica, vive en el Secret `alquimia-cosign-key`. Ninguna de las dos forma parte del repositorio: se suministran en el archivo de values de la instalación.
+The runtime verifies the signature of every OCI artifact it fetches and, if the overlay includes the private key, also signs what it publishes. The public key lives in the `alquimia-cosign` ConfigMap. The private key, when provided, lives in the `alquimia-cosign-key` Secret. Neither is part of the repository: they are supplied in the installation's values file.
 
-Con `runtime.zeroTrust.enabled: true` la política queda en `ALQUIMIA_OCI_SIGNATURE_POLICY=required` (`runtime.zeroTrust.signaturePolicy`). Sin Zero Trust la política queda en `off` y el runtime no exige firma.
+With `runtime.zeroTrust.enabled: true` the policy is `ALQUIMIA_OCI_SIGNATURE_POLICY=required` (`runtime.zeroTrust.signaturePolicy`). Without Zero Trust the policy is `off` and the runtime does not require a signature.
 
-## Solo verificación (pull)
+## Verification only (pull)
 
-Alcanza con `runtime.cosign.publicKey`. El chart monta ese PEM en `/etc/alquimia/cosign/cosign.pub` y define `ALQUIMIA_OCI_COSIGN_PUBKEY` con esa ruta. Cada artefacto tiene que estar firmado con la clave privada correspondiente. Si falta la clave pública, o el artefacto no tiene firma, la descarga falla.
+`runtime.cosign.publicKey` is enough. The chart mounts that PEM at `/etc/alquimia/cosign/cosign.pub` and sets `ALQUIMIA_OCI_COSIGN_PUBKEY` to that path. Every artifact must be signed with the matching private key. If the public key is missing, or the artifact has no signature, the download fails.
 
-No hace falta `privateKey` ni `password`. `ALQUIMIA_OCI_COSIGN_KEY` y `COSIGN_PASSWORD` no se inyectan.
+`privateKey` and `password` are not needed. `ALQUIMIA_OCI_COSIGN_KEY` and `COSIGN_PASSWORD` are not injected.
 
 ```yaml
 runtime:
   cosign:
     publicKey: |
       -----BEGIN PUBLIC KEY-----
-      PEM de cosign.pub
+      PEM from cosign.pub
       -----END PUBLIC KEY-----
 ```
 
-## Verificación y firma (pull y push)
+## Verification and signing (pull and push)
 
-Para que el runtime firme al publicar, el mismo bloque incluye el PEM privado y la passphrase:
+For the runtime to sign on publish, the same block includes the private PEM and the passphrase:
 
 ```yaml
 runtime:
   cosign:
     publicKey: |
       -----BEGIN PUBLIC KEY-----
-      PEM de cosign.pub
+      PEM from cosign.pub
       -----END PUBLIC KEY-----
     privateKey: |
       -----BEGIN ENCRYPTED SIGSTORE PRIVATE KEY-----
-      PEM de cosign.key
+      PEM from cosign.key
       -----END ENCRYPTED SIGSTORE PRIVATE KEY-----
     password: ""
 ```
 
-El chart guarda el PEM en el Secret `alquimia-cosign-key`, lo monta junto a la clave pública y deja estas variables en el master y en los workers:
+The chart stores the PEM in the `alquimia-cosign-key` Secret, mounts it next to the public key, and sets these variables on the master and the workers:
 
-| Variable | Valor |
+| Variable | Value |
 |---|---|
 | `ALQUIMIA_OCI_COSIGN_PUBKEY` | `/etc/alquimia/cosign/cosign.pub` |
 | `ALQUIMIA_OCI_COSIGN_KEY` | `/etc/alquimia/cosign/cosign.key` |
-| `COSIGN_PASSWORD` | el valor de `runtime.cosign.password` |
+| `COSIGN_PASSWORD` | the value of `runtime.cosign.password` |
 
-`ALQUIMIA_OCI_COSIGN_KEY` es la ruta del archivo, igual que `ALQUIMIA_OCI_COSIGN_PUBKEY`. El PEM se escribe en `privateKey`, no en la variable.
+`ALQUIMIA_OCI_COSIGN_KEY` is the file path, the same as `ALQUIMIA_OCI_COSIGN_PUBKEY`. The PEM is written in `privateKey`, not in the variable.
 
-`COSIGN_PASSWORD` es la passphrase con la que se generó `cosign.key`. Si esa passphrase está vacía, el overlay lleva `password: ""`. El Secret queda con `COSIGN_PASSWORD` vacío. No se rellena con un texto, un espacio ni un valor por defecto. Cosign usa esa variable para no pedir la passphrase en modo interactivo; si la clave no tiene passphrase y la variable no existe, la firma falla.
+`COSIGN_PASSWORD` is the passphrase `cosign.key` was generated with. If that passphrase is empty, the overlay uses `password: ""`. The Secret is left with an empty `COSIGN_PASSWORD`. Do not fill it with text, a space, or a default value. Cosign uses that variable so it does not prompt for the passphrase in interactive mode; if the key has no passphrase and the variable does not exist, signing fails.
 
-Con `privateKey` vacío el runtime solo verifica. No se crea el Secret y no se define `ALQUIMIA_OCI_COSIGN_KEY`.
+With `privateKey` empty the runtime only verifies. The Secret is not created and `ALQUIMIA_OCI_COSIGN_KEY` is not set.
 
-Las credenciales de push al registry (`registry.dockerconfig` o `registry.public`) son distintas de la clave de cosign. Autentican contra el registry; no firman el artefacto.
+Push credentials for the registry (`registry.dockerconfig` or `registry.public`) are separate from the cosign key. They authenticate to the registry; they do not sign the artifact.
 
-## Firma fuera del cluster
+## Signing outside the cluster
 
-La publicación puede firmar el tag antes de que el runtime lo obtenga. En ese caso el cluster solo necesita `publicKey`. La passphrase, si existe, se usa en ese comando y no entra al chart:
+Publishing can sign the tag before the runtime fetches it. In that case the cluster only needs `publicKey`. The passphrase, if there is one, is used in that command and does not enter the chart:
 
 ```bash
 cosign sign --key cosign.key --use-signing-config=false --tlog-upload=false \
-  registry.acme.example/brains/<nombre>:latest
+  registry.acme.example/brains/<name>:latest
 ```
 
-`ALQUIMIA_OCI_COSIGN_TLOG_UPLOAD` queda en `false`: la firma no se publica en un transparency log público. `ALQUIMIA_OCI_COSIGN_HOME` queda en `/tmp/cosign`.
+`ALQUIMIA_OCI_COSIGN_TLOG_UPLOAD` stays `false`: the signature is not published to a public transparency log. `ALQUIMIA_OCI_COSIGN_HOME` stays `/tmp/cosign`.

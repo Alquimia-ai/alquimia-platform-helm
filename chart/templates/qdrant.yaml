@@ -1,5 +1,5 @@
 {{- if not .Values.qdrant.enabled }}
-{{- fail "qdrant es obligatorio: el runtime lo usa como knowledge provider" }}
+{{- fail "qdrant is required: the runtime uses it as the knowledge provider" }}
 {{- end }}
 apiVersion: v1
 kind: Service
