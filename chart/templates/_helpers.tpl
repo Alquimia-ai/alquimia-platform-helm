@@ -124,6 +124,32 @@ true
 {{- $mode -}}
 {{- end }}
 
+{{- define "alquimia.zotConfig" -}}
+{
+  "storage": {
+    "rootDirectory": "/var/lib/registry"
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000",
+    "realm": "zot",
+    "compat": ["docker2s2"]{{- if eq (include "alquimia.registryTLS" .) "true" }},
+    "tls": {
+      "cert": "/certs/tls.crt",
+      "key": "/certs/tls.key"
+    }{{- end }},
+    "auth": {
+      "htpasswd": {
+        "path": "/auth/auth.htpasswd"
+      }
+    }
+  },
+  "log": {
+    "level": "info"
+  }
+}
+{{- end }}
+
 {{- define "alquimia.registryHost" -}}
 {{- if eq (include "alquimia.registryMode" .) "remote" -}}
 {{- $host := .Values.registry.host | default "" | trim -}}

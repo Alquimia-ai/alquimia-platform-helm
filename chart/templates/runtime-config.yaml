@@ -38,6 +38,7 @@ data:
   ALQUIMIA_OCI_REGISTRY_DEFAULT: {{ include "alquimia.registryHost" . | quote }}
   ALQUIMIA_OCI_NAMESPACE_AGENTSPACES: {{ .Values.studio.config.EXTERNAL_REGISTRY_AGENTS_PROJECT | quote }}
   ALQUIMIA_OCI_NAMESPACE_BRAINS: {{ .Values.studio.config.EXTERNAL_REGISTRY_BRAINS_PROJECT | quote }}
+  ALQUIMIA_OCI_INDEX_ENABLED: {{ .Values.runtime.config.ALQUIMIA_OCI_INDEX_ENABLED | quote }}
   ALQUIMIA_OCI_REFERRERS_FALLBACK: {{ .Values.runtime.config.ALQUIMIA_OCI_REFERRERS_FALLBACK | quote }}
   ALQUIMIA_OCI_SUBPROCESS_TIMEOUT: {{ .Values.runtime.config.ALQUIMIA_OCI_SUBPROCESS_TIMEOUT | quote }}
   ALQUIMIA_OCI_COSIGN_HOME: {{ .Values.runtime.config.ALQUIMIA_OCI_COSIGN_HOME | quote }}
@@ -71,7 +72,7 @@ data:
   QDRANT_HTTPS: "false"
   {{- $studioHost := include "alquimia.studioHost" . | trim }}
   {{- if $studioHost }}
-  ALLOWED_ORIGINS: {{ printf "[\"https://%s\"]" $studioHost | quote }}
+  ALLOWED_ORIGINS: {{ printf "[\"%s://%s\"]" (.Values.studio.scheme | default "https") $studioHost | quote }}
   {{- end }}
   OTEL_EXCLUDED_ATTRIBUTES: {{ .Values.otel.excludedAttributes | quote }}
   {{- if .Values.otel.enabled }}

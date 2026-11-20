@@ -8,6 +8,8 @@ Parámetros de la instalación: [docs/configuracion.md](docs/configuracion.md).
 
 Firma OCI: [docs/cosign.md](docs/cosign.md).
 
+Registry Quay: [docs/quay.md](docs/quay.md).
+
 ## Requisitos
 
 - Cluster con `kubectl` o `oc`

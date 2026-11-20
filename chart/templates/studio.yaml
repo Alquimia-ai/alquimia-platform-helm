@@ -62,11 +62,10 @@ data:
   OTEL_SDK_DISABLED: {{ .Values.studio.config.OTEL_SDK_DISABLED | quote }}
   {{- end }}
   NODE_ENV: {{ .Values.studio.config.NODE_ENV | quote }}
+  {{- $scheme := .Values.studio.scheme | default "https" }}
   {{- with (include "alquimia.studioHost" . | trim) }}
-  NEXT_PUBLIC_APP_URL: {{ printf "https://%s" . | quote }}
-  {{- if $.Values.keycloak.studioAuth.enabled }}
-  NEXTAUTH_URL: {{ printf "https://%s" . | quote }}
-  {{- end }}
+  NEXT_PUBLIC_APP_URL: {{ printf "%s://%s" $scheme . | quote }}
+  NEXTAUTH_URL: {{ printf "%s://%s" $scheme . | quote }}
   {{- end }}
 {{- if eq (include "alquimia.helmSecrets" .) "true" }}
 ---
@@ -85,7 +84,11 @@ stringData:
   {{- if not .Values.keycloak.studioAuth.enabled }}
   AUTH_LITE_USERS: {{ .Values.studio.secrets.authLiteUsers | quote }}
   {{- end }}
-  ALQUIMIA_ASSISTANT_API_KEY: {{ .Values.studio.secrets.assistantApiKey | quote }}
+  {{- $assistantKey := .Values.studio.secrets.assistantApiKey }}
+  {{- if and (not $assistantKey) (ne (include "alquimia.runtimeKeycloak" .) "true") }}
+  {{- $assistantKey = .Values.runtime.secrets.apiToken }}
+  {{- end }}
+  ALQUIMIA_ASSISTANT_API_KEY: {{ $assistantKey | quote }}
   NEXTAUTH_SECRET: {{ .Values.studio.secrets.nextAuthSecret | quote }}
   {{- if .Values.keycloak.studioAuth.enabled }}
   KEYCLOAK_CLIENT_SECRET: {{ .Values.keycloak.studioAuth.clientSecret | quote }}
@@ -139,6 +142,15 @@ spec:
           env:
             - name: NEDB_DATA_DIR
               value: /app/.data
+            {{- if ne (include "alquimia.runtimeKeycloak" .) "true" }}
+            # El runtime con API_TOKEN rechaza cualquier otra credencial.
+            # env pisa el valor que venga en alquimia-studio-secrets.
+            - name: ALQUIMIA_ASSISTANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: alquimia-auth
+                  key: API_TOKEN
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: alquimia-studio-config

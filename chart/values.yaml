@@ -40,7 +40,7 @@ images:
   postgres: docker.io/library/postgres:16
   redis: redis:7
   qdrant: docker.io/qdrant/qdrant:v1.19.2
-  registry: ghcr.io/oras-project/registry:v1.0.0-rc.4
+  registry: ghcr.io/project-zot/zot:v2.1.5
   rclone: rclone/rclone:1.75.1
   runtime: alquimiaai/runtime:0.7.2
   studio: alquimiaai/studio:0.2.1
@@ -97,7 +97,7 @@ qdrant:
 registry:
   enabled: true
   storage: 10Gi
-  # local: despliega oras-registry y es el registry por defecto del runtime.
+  # local: despliega zot (Service oras-registry) y es el registry por defecto del runtime.
   # remote: no lo despliega; el runtime usa solo host.
   mode: local
   host: ""
@@ -183,6 +183,9 @@ runtime:
     ORAS_INSECURE: "false"
     ORAS_PLAIN_HTTP: "false"
     ALQUIMIA_OCI_DEV_MODE: "false"
+    # true: cada publish se adjunta al índice del namespace
+    # (agents/index, brains/index). false lo deja solo en su repositorio.
+    ALQUIMIA_OCI_INDEX_ENABLED: "true"
     ALQUIMIA_OCI_REFERRERS_FALLBACK: error
     ALQUIMIA_OCI_SUBPROCESS_TIMEOUT: "300"
     ALQUIMIA_OCI_COSIGN_HOME: /tmp/cosign
@@ -374,6 +377,8 @@ studio:
   exposure: route
   # Vacío en route: alquimia-studio.<appsDomain>. En ingress es obligatorio.
   host: ""
+  # https en un cluster con TLS. http solo si el Ingress no termina TLS.
+  scheme: https
   ingress:
     className: ""
     path: /
@@ -396,6 +401,9 @@ studio:
     OTEL_SDK_DISABLED: "true"
     NODE_ENV: production
   secrets:
+    # JSON: [{email, name, password_hash}]. password_hash es el bcrypt en base64.
     authLiteUsers: ""
+    # Vacío y runtime sin Keycloak: Studio usa runtime.secrets.apiToken.
+    # El runtime compara esa credencial con API_TOKEN; otro valor lo rechaza.
     assistantApiKey: ""
     nextAuthSecret: ""
