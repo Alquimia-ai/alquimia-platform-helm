@@ -1,8 +1,8 @@
-# RBAC de vault-unsealer (SA + Role + RoleBinding)
+# vault-unsealer RBAC (SA + Role + RoleBinding)
 
-Cuando Argo CD **no puede crear ServiceAccounts**, hay que crear el SA por consola (o aplicar este manifiesto) y dejar que el chart **solo lo referencie**.
+When Argo CD **cannot create ServiceAccounts**, create the SA out of band (or apply this manifest) and let the chart **only reference it**.
 
-En `chart/values.yaml`:
+In `chart/values.yaml`:
 
 ```yaml
 vault:
@@ -12,13 +12,13 @@ vault:
     name: vault-unsealer
 ```
 
-Con `create: false` el chart no crea el SA. El Deployment usa `serviceAccountName` con el `name` de arriba. Role y RoleBinding los sigue aplicando Argo, salvo que también los creen a mano con el YAML de abajo.
+With `create: false` the chart does not create the SA. The Deployment uses `serviceAccountName` with the `name` above. Argo still applies the Role and RoleBinding, unless those are also created by hand with the YAML below.
 
-## Aplicar
+## Apply
 
-Reemplazar `NAMESPACE` por el mismo valor que `namespace` en `values.yaml` (por defecto `alquimia-platform`).
+Replace `NAMESPACE` with the same value as `namespace` in `values.yaml` (default `alquimia-platform`).
 
-Si cambian `vault.keysSecret`, actualizar también `resourceNames` del Role.
+If `vault.keysSecret` changes, also update the Role's `resourceNames`.
 
 ```bash
 oc apply -f - <<'EOF'
@@ -66,11 +66,11 @@ subjects:
 EOF
 ```
 
-## Qué permite
+## What it allows
 
-| Recurso | Verbos | Motivo |
+| Resource | Verbs | Reason |
 |---|---|---|
-| `secrets` | `create` | Crear `vault-keys` y `alquimia-vault` en el primer init |
-| `secrets` (`vault-keys`, `alquimia-vault`) | `get`, `update`, `patch` | Leer keys, guardar root token y actualizar unseal keys |
+| `secrets` | `create` | Create `vault-keys` and `alquimia-vault` on the first init |
+| `secrets` (`vault-keys`, `alquimia-vault`) | `get`, `update`, `patch` | Read the keys, store the root token, and update the unseal keys |
 
-El unsealer no necesita permisos fuera de este namespace.
+The unsealer does not need permissions outside this namespace.

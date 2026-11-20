@@ -1,8 +1,8 @@
-# Recursos por aplicación
+# Resources per application
 
-Defaults de `chart/values.yaml`. Consumo = requests → limits del contenedor principal.
+Defaults from `chart/values.yaml`. Usage = requests → limits of the main container.
 
-| Aplicación | Workload | Service | Almacenamiento | Consumo | SA |
+| Application | Workload | Service | Storage | Usage | SA |
 |---|---|---|---|---|---|
 | MinIO | Deployment `minio` | `minio-service` :9000 / :9090 | PVC `minio-pvc` 100Gi | 100m / 300Mi → 500m / 1Gi | `default` |
 | Kafka | StatefulSet `kafka` + Job `kafka-init-topics` | `kafka` :9092 | PVC `data-kafka-0` 100Gi | 250m / 512Mi → 1 / 1Gi | `default` |

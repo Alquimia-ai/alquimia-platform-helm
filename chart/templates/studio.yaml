@@ -87,7 +87,7 @@ spec:
         - name: alquimia-studio
           image: {{ .Values.images.studio | quote }}
           imagePullPolicy: Always
-          # Imagen hace chown+su-exec a nextjs; en OpenShift el UID aleatorio no puede.
+          # The image does chown+su-exec to nextjs; on OpenShift the random UID cannot.
           command:
             - /bin/sh
             - -c

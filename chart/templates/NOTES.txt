@@ -1,37 +1,37 @@
-Chart alquimia desplegado en el namespace {{ include "alquimia.namespace" . }}.
+Alquimia chart deployed in namespace {{ include "alquimia.namespace" . }}.
 {{- if .Values.createNamespace }}
-Namespace: se crea solo si no existe.
+Namespace: created only if it does not exist.
 {{- else }}
-Namespace: no lo gestiona el chart (debe existir de antemano).
+Namespace: the chart does not manage it (it must exist beforehand).
 {{- end }}
 
 Secrets: backend={{ .Values.secrets.backend | default "sealed" }}.
 {{- if eq (.Values.secrets.backend | default "sealed") "sealed" }}
-Helm no crea Secrets en claro. Hay que generar values-sealed.yaml:
+Helm does not create plaintext Secrets. Generate values-sealed.yaml:
 
   kubeseal --fetch-cert --controller-namespace sealed-secrets --controller-name sealed-secrets > sealed-cert.pem
   ./chart/scripts/seal-secrets.sh sealed-cert.pem
 
-El controller de Sealed Secrets debe existir en el cluster.
-No sellar alquimia-vault ni vault-keys: los escribe vault-unsealer.
+The Sealed Secrets controller must exist in the cluster.
+Do not seal alquimia-vault or vault-keys: vault-unsealer writes them.
 {{- end }}
 
 {{- if .Values.vault.enabled }}
-Vault queda instalado en este chart (StatefulSet `vault`).
+Vault is installed by this chart (StatefulSet `vault`).
 {{- if .Values.vault.autoUnseal }}
-El Deployment `vault-unsealer` hace init + unseal en bucle y guarda
-las keys en el secret {{ .Values.vault.keysSecret }}. El root token
-se escribe en `alquimia-vault` (VAULT_TOKEN).
-Si se pierde ese secret y el PVC de Vault sigue, no hay forma de unsealar.
+The `vault-unsealer` Deployment runs init + unseal in a loop and stores
+the keys in the secret {{ .Values.vault.keysSecret }}. The root token
+is written to `alquimia-vault` (VAULT_TOKEN).
+If that secret is lost and the Vault PVC remains, there is no way to unseal.
 {{- $sa := .Values.vault.serviceAccount | default dict }}
 {{- if and (hasKey $sa "create") (not $sa.create) }}
-El SA {{ $sa.name | default "vault-unsealer" }} no lo crea el chart (docs/vault-unsealer-rbac.md).
+The chart does not create the {{ $sa.name | default "vault-unsealer" }} SA (docs/vault-unsealer-rbac.md).
 {{- end }}
 {{- end }}
 {{- end }}
 
-El secret de pull ({{ .Values.imagePullSecret.name }}) debe existir como
-SealedSecret (archivo .dockerconfigjson en secrets/local).
+The pull secret ({{ .Values.imagePullSecret.name }}) must exist as a
+SealedSecret (.dockerconfigjson file under secrets/local).
 {{- if .Values.studio.enabled }}
 {{- $studioHost := include "alquimia.studioHost" . | trim }}
 {{- if $studioHost }}
