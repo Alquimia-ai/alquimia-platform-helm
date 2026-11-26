@@ -86,7 +86,11 @@ The realm, the client id, and the secrets belong to the installation. The runtim
 
 `runtime.zeroTrust.enabled: true` turns on Keycloak in the runtime, the SPIFFE socket, and OCI signature verification. `spire.enabled: true` installs SPIRE in the `spire` namespace.
 
-`tlsEnforce` stays `false`. Redis, PostgreSQL, Kafka, MinIO, Vault, and Qdrant talk without TLS inside the cluster. The current runtime image does not support TLS for Redis: the connection fails on the first command. Kafka only accepts certificates through `KAFKA_SSL_*_FILE`, not as certificate content in a variable.
+`tlsEnforce` stays `false`. Redis, PostgreSQL, Kafka, the MinIO this chart installs, Vault, and Qdrant talk without TLS inside the cluster. The current runtime image does not support TLS for Redis: the connection fails on the first command. Kafka only accepts certificates through `KAFKA_SSL_*_FILE`, not as certificate content in a variable.
+
+## MinIO
+
+`minio.enabled: true` deploys MinIO in the installation namespace. The runtime and rclone use `http://minio-service.<namespace>.svc.cluster.local:9000`. A MinIO that already exists, its access key, and a private CA are in [minio.md](minio.md).
 
 ## Qdrant
 

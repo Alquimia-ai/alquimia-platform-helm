@@ -43,6 +43,7 @@ spec:
         fsGroup: 1000
         {{- end }}
       initContainers:
+        {{- include "alquimia.registryTrustInit" . | nindent 8 }}
         {{- if and .Values.vault.enabled .Values.vault.autoUnseal }}
         {{- include "alquimia.waitVaultInit" . | nindent 8 }}
         {{- end }}
@@ -75,11 +76,7 @@ spec:
                 secretKeyRef:
                   name: alquimia-s3
                   key: BLOB_S3_PROVIDER
-            - name: RCLONE_S3_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: alquimia-s3
-                  key: BLOB_S3_ENDPOINT_URL
+            {{- include "alquimia.rcloneS3EndpointEnv" . | nindent 12 }}
             - name: RCLONE_S3_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -98,13 +95,13 @@ spec:
           volumeMounts:
             - name: registry-storage
               mountPath: /var/lib/alquimia/registry
+            {{- include "alquimia.minioCaRcloneMount" . | nindent 12 }}
           securityContext:
             capabilities:
               drop:
                 - ALL
             allowPrivilegeEscalation: false
           {{- include "alquimia.helperResources" . | nindent 10 }}
-        {{- include "alquimia.registryTrustInit" . | nindent 8 }}
       containers:
         - name: s3-sync
           image: {{ .Values.images.rclone | quote }}
@@ -131,11 +128,7 @@ spec:
                 secretKeyRef:
                   name: alquimia-s3
                   key: BLOB_S3_PROVIDER
-            - name: RCLONE_S3_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: alquimia-s3
-                  key: BLOB_S3_ENDPOINT_URL
+            {{- include "alquimia.rcloneS3EndpointEnv" . | nindent 12 }}
             - name: RCLONE_S3_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -154,6 +147,7 @@ spec:
           volumeMounts:
             - name: registry-storage
               mountPath: /var/lib/alquimia/registry
+            {{- include "alquimia.minioCaRcloneMount" . | nindent 12 }}
           securityContext:
             capabilities:
               drop:
@@ -178,6 +172,7 @@ spec:
               value: /tmp
             {{- include "alquimia.cosignPasswordEnv" . | nindent 12 }}
             {{- include "alquimia.registryTrustEnv" . | nindent 12 }}
+            {{- include "alquimia.s3RemoteEnv" . | nindent 12 }}
             - name: SPIFFE_ENABLED
               value: {{ if .Values.runtime.zeroTrust.enabled }}"true"{{ else }}"false"{{ end }}
             - name: SPIFFE_SOCKET_PATH

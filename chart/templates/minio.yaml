@@ -1,3 +1,4 @@
+{{- include "alquimia.minioValidate" . -}}
 {{- if .Values.minio.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -133,4 +134,19 @@ spec:
       protocol: TCP
       port: 9090
       targetPort: 9090
+{{- end }}
+{{- if and (include "alquimia.minioCaBundle" .) (not (include "alquimia.minioCaExistingSecret" .)) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alquimia-minio-ca
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  ca.crt: |
+{{ printf "%s\n" (include "alquimia.minioCaBundle" .) | indent 4 }}
 {{- end }}

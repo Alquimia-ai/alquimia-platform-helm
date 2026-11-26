@@ -186,11 +186,11 @@ type: Opaque
 stringData:
   BLOB_S3_ACCESS_KEY: {{ .Values.runtime.secrets.s3.accessKey | quote }}
   BLOB_S3_BUCKET_NAME: {{ .Values.runtime.secrets.s3.bucketName | quote }}
-  BLOB_S3_ENDPOINT_URL: {{ printf "http://minio-service.%s.svc.cluster.local:9000" (include "alquimia.namespace" .) | quote }}
+  BLOB_S3_ENDPOINT_URL: {{ include "alquimia.s3Endpoint" . | quote }}
   BLOB_S3_PROVIDER: {{ .Values.runtime.secrets.s3.provider | quote }}
   BLOB_S3_REGION_NAME: {{ .Values.runtime.secrets.s3.region | quote }}
   BLOB_S3_SECRET_KEY: {{ .Values.runtime.secrets.s3.secretKey | quote }}
-  BLOB_S3_SECURE: {{ .Values.runtime.secrets.s3.secure | quote }}
+  BLOB_S3_SECURE: {{ include "alquimia.s3Secure" . | quote }}
   REGISTRY_S3_BUCKET_NAME: {{ .Values.runtime.secrets.s3.registryBucketName | quote }}
 ---
 apiVersion: v1

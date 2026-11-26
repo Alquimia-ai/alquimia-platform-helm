@@ -10,6 +10,8 @@ OCI signing: [docs/cosign.md](docs/cosign.md).
 
 Quay registry: [docs/quay.md](docs/quay.md).
 
+MinIO, including a remote endpoint and a private CA: [docs/minio.md](docs/minio.md).
+
 ## Requirements
 
 - Cluster with `kubectl` or `oc`

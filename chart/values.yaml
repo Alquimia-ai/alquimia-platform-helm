@@ -62,6 +62,19 @@ minio:
   auth:
     rootUser: ""
     rootPassword: ""
+  # Empty: http://minio-service.<namespace>.svc.cluster.local:9000, the MinIO
+  # this chart deploys. Set it, with enabled: false, to use one that already
+  # exists. https:// turns BLOB_S3_SECURE on. With secrets.backend sealed and
+  # an empty endpoint, the URL stays the one in the alquimia-s3 Secret.
+  endpoint: ""
+  # Private CA for that remote MinIO. The runtime and rclone append it to the
+  # image trust store. bundle and existingSecret cannot both be set. Requires
+  # enabled: false and an https:// endpoint (or, with sealed secrets, an https
+  # URL already stored in alquimia-s3).
+  ca:
+    bundle: ""
+    existingSecret: ""
+    existingSecretKey: ca.crt
 
 kafka:
   enabled: true

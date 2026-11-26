@@ -208,6 +208,109 @@ true
 {{- end -}}
 {{- end }}
 
+{{- define "alquimia.minioEndpoint" -}}
+{{- .Values.minio.endpoint | default "" | trim | trimSuffix "/" -}}
+{{- end }}
+
+{{- define "alquimia.minioCaBundle" -}}
+{{- $ca := .Values.minio.ca | default dict -}}
+{{- $ca.bundle | default "" | trim -}}
+{{- end }}
+
+{{- define "alquimia.minioCaExistingSecret" -}}
+{{- $ca := .Values.minio.ca | default dict -}}
+{{- $ca.existingSecret | default "" | trim -}}
+{{- end }}
+
+{{- define "alquimia.minioCaSecretKey" -}}
+{{- $ca := .Values.minio.ca | default dict -}}
+{{- $key := $ca.existingSecretKey | default "" | trim -}}
+{{- if $key }}{{ $key }}{{ else }}ca.crt{{ end -}}
+{{- end }}
+
+{{- define "alquimia.minioCa" -}}
+{{- if or (include "alquimia.minioCaBundle" .) (include "alquimia.minioCaExistingSecret" .) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.minioValidate" -}}
+{{- $ep := include "alquimia.minioEndpoint" . -}}
+{{- $bundle := include "alquimia.minioCaBundle" . -}}
+{{- $secret := include "alquimia.minioCaExistingSecret" . -}}
+{{- if and $bundle $secret -}}
+{{- fail "minio.ca.bundle and minio.ca.existingSecret cannot both be set" -}}
+{{- end -}}
+{{- if and $ep .Values.minio.enabled -}}
+{{- fail "minio.endpoint requires minio.enabled false" -}}
+{{- end -}}
+{{- if and $ep (not (or (hasPrefix "https://" $ep) (hasPrefix "http://" $ep))) -}}
+{{- fail "minio.endpoint must start with https:// or http://" -}}
+{{- end -}}
+{{- if and (or $bundle $secret) .Values.minio.enabled -}}
+{{- fail "minio.ca requires minio.enabled false" -}}
+{{- end -}}
+{{- if and (or $bundle $secret) (hasPrefix "http://" $ep) -}}
+{{- fail "minio.ca requires an https:// endpoint" -}}
+{{- end -}}
+{{- if and (not .Values.minio.enabled) (not $ep) (eq (include "alquimia.helmSecrets" .) "true") -}}
+{{- fail "minio.enabled false requires minio.endpoint when secrets.backend is helm" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.s3Endpoint" -}}
+{{- $ep := include "alquimia.minioEndpoint" . -}}
+{{- if $ep -}}
+{{- $ep -}}
+{{- else -}}
+{{- printf "http://minio-service.%s.svc.cluster.local:9000" (include "alquimia.namespace" .) -}}
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.s3Secure" -}}
+{{- $ep := include "alquimia.minioEndpoint" . -}}
+{{- if hasPrefix "https://" $ep -}}
+true
+{{- else if hasPrefix "http://" $ep -}}
+false
+{{- else -}}
+{{- .Values.runtime.secrets.s3.secure | toString -}}
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.s3RemoteEnv" -}}
+{{- if include "alquimia.minioEndpoint" . }}
+- name: BLOB_S3_ENDPOINT_URL
+  value: {{ include "alquimia.minioEndpoint" . | quote }}
+- name: BLOB_S3_SECURE
+  value: {{ include "alquimia.s3Secure" . | quote }}
+{{- end }}
+{{- end }}
+
+{{- define "alquimia.rcloneS3EndpointEnv" -}}
+- name: RCLONE_S3_ENDPOINT
+  {{- if include "alquimia.minioEndpoint" . }}
+  value: {{ include "alquimia.minioEndpoint" . | quote }}
+  {{- else }}
+  valueFrom:
+    secretKeyRef:
+      name: alquimia-s3
+      key: BLOB_S3_ENDPOINT_URL
+  {{- end }}
+{{- if eq (include "alquimia.minioCa" .) "true" }}
+- name: RCLONE_CA_CERT
+  value: /trust/ca-bundle.crt
+{{- end }}
+{{- end }}
+
+{{- define "alquimia.minioCaRcloneMount" -}}
+{{- if eq (include "alquimia.minioCa" .) "true" }}
+- name: trust-bundle
+  mountPath: /trust
+  readOnly: true
+{{- end }}
+{{- end }}
+
 {{- define "alquimia.registryPlainHttp" -}}
 {{- if eq (include "alquimia.registryTLS" .) "true" -}}
 false
@@ -325,18 +428,33 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustInit" -}}
-{{- if eq (include "alquimia.registryTrust" .) "true" }}
-- name: trust-registry-ca
+{{- if or (eq (include "alquimia.registryTrust" .) "true") (eq (include "alquimia.minioCa" .) "true") }}
+- name: trust-ca
   image: {{ .Values.images.runtime | quote }}
   imagePullPolicy: IfNotPresent
   command:
     - /bin/sh
     - -c
-    - cat /etc/ssl/cert.pem /etc/alquimia/registry-ca/ca.crt > /trust/ca-bundle.crt
+    - |
+      set -e
+      cat /etc/ssl/cert.pem > /trust/ca-bundle.crt
+      if [ -f /etc/alquimia/registry-ca/ca.crt ]; then
+        cat /etc/alquimia/registry-ca/ca.crt >> /trust/ca-bundle.crt
+      fi
+      if [ -f /etc/alquimia/minio-ca/ca.crt ]; then
+        cat /etc/alquimia/minio-ca/ca.crt >> /trust/ca-bundle.crt
+      fi
   volumeMounts:
+    {{- if eq (include "alquimia.registryTrust" .) "true" }}
     - name: registry-ca
       mountPath: /etc/alquimia/registry-ca
       readOnly: true
+    {{- end }}
+    {{- if eq (include "alquimia.minioCa" .) "true" }}
+    - name: minio-ca
+      mountPath: /etc/alquimia/minio-ca
+      readOnly: true
+    {{- end }}
     - name: trust-bundle
       mountPath: /trust
   securityContext:
@@ -350,18 +468,22 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustEnv" -}}
-{{- if eq (include "alquimia.registryTrust" .) "true" }}
+{{- if or (eq (include "alquimia.registryTrust" .) "true") (eq (include "alquimia.minioCa" .) "true") }}
 - name: SSL_CERT_FILE
   value: /trust/ca-bundle.crt
 - name: REQUESTS_CA_BUNDLE
   value: /trust/ca-bundle.crt
 - name: CURL_CA_BUNDLE
   value: /trust/ca-bundle.crt
+{{- if eq (include "alquimia.minioCa" .) "true" }}
+- name: AWS_CA_BUNDLE
+  value: /trust/ca-bundle.crt
+{{- end }}
 {{- end }}
 {{- end }}
 
 {{- define "alquimia.registryTrustMount" -}}
-{{- if eq (include "alquimia.registryTrust" .) "true" }}
+{{- if or (eq (include "alquimia.registryTrust" .) "true") (eq (include "alquimia.minioCa" .) "true") }}
 - name: trust-bundle
   mountPath: /trust
   readOnly: true
@@ -369,6 +491,7 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustVolumes" -}}
+{{- if or (eq (include "alquimia.registryTrust" .) "true") (eq (include "alquimia.minioCa" .) "true") }}
 {{- if eq (include "alquimia.registryTrust" .) "true" }}
 - name: registry-ca
   {{- if eq (include "alquimia.registryTLS" .) "true" }}
@@ -390,6 +513,23 @@ securityContext:
       - key: ca.crt
         path: ca.crt
   {{- end }}
+{{- end }}
+{{- if eq (include "alquimia.minioCa" .) "true" }}
+- name: minio-ca
+  {{- if include "alquimia.minioCaExistingSecret" . }}
+  secret:
+    secretName: {{ include "alquimia.minioCaExistingSecret" . | quote }}
+    items:
+      - key: {{ include "alquimia.minioCaSecretKey" . | quote }}
+        path: ca.crt
+  {{- else }}
+  configMap:
+    name: alquimia-minio-ca
+    items:
+      - key: ca.crt
+        path: ca.crt
+  {{- end }}
+{{- end }}
 - name: trust-bundle
   emptyDir: {}
 {{- end }}
