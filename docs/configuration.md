@@ -66,6 +66,8 @@ With Zero Trust the runtime does not use a static token. Authentication to Vault
 
 With `registry.mode: local` the chart deploys `oras-registry` in the installation namespace. That service is the runtime's default registry. `registry.tls: true` publishes the local registry over HTTPS. The chart issues the CA, keeps it across upgrades, and the runtime uses it to verify the certificate.
 
+With `registry.mode: remote` the runtime uses `registry.host`. A certificate signed by an internal CA is mounted with `registry.ca` on the runtime and the workers. See [quay.md](quay.md).
+
 `registry.public` is a second, read-only registry for public OCI artifacts (projects `agents` and `brains`). It requires a username and password. On Harbor, a robot account. Those credentials are not included in the repository.
 
 To use Quay as a remote registry, with a robot account and the OCI index, see [quay.md](quay.md).

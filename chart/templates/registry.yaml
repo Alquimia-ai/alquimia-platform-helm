@@ -1,3 +1,4 @@
+{{- include "alquimia.registryCaValidate" . -}}
 {{- if and .Values.registry.enabled (eq (include "alquimia.registryMode" .) "local") }}
 {{- $registryCaSum := "" }}
 {{- if eq (include "alquimia.helmSecrets" .) "true" }}
@@ -196,4 +197,19 @@ stringData:
   {{- $auths = merge $auths (dict $pub.host (dict "username" $pub.username "password" $pub.password)) }}
   {{- end }}
   .dockerconfigjson: {{ dict "auths" $auths | toJson | quote }}
+{{- end }}
+{{- if and (eq (include "alquimia.registryMode" .) "remote") (include "alquimia.registryCaBundle" .) (not (include "alquimia.registryCaExistingSecret" .)) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alquimia-registry-ca
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  ca.crt: |
+{{ printf "%s\n" (include "alquimia.registryCaBundle" .) | indent 4 }}
 {{- end }}

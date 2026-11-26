@@ -166,6 +166,48 @@ true
 {{- if and (eq (include "alquimia.registryMode" .) "local") .Values.registry.tls }}true{{- end -}}
 {{- end }}
 
+{{- define "alquimia.registryCaBundle" -}}
+{{- $ca := .Values.registry.ca | default dict -}}
+{{- $ca.bundle | default "" | trim -}}
+{{- end }}
+
+{{- define "alquimia.registryCaExistingSecret" -}}
+{{- $ca := .Values.registry.ca | default dict -}}
+{{- $ca.existingSecret | default "" | trim -}}
+{{- end }}
+
+{{- define "alquimia.registryCaSecretKey" -}}
+{{- $ca := .Values.registry.ca | default dict -}}
+{{- $key := $ca.existingSecretKey | default "" | trim -}}
+{{- if $key }}{{ $key }}{{ else }}ca.crt{{ end -}}
+{{- end }}
+
+{{- define "alquimia.registryCaValidate" -}}
+{{- $bundle := include "alquimia.registryCaBundle" . -}}
+{{- $secret := include "alquimia.registryCaExistingSecret" . -}}
+{{- if and $bundle $secret -}}
+{{- fail "registry.ca.bundle and registry.ca.existingSecret cannot both be set" -}}
+{{- end -}}
+{{- if and (or $bundle $secret) (ne (include "alquimia.registryMode" .) "remote") -}}
+{{- fail "registry.ca requires registry.mode remote" -}}
+{{- end -}}
+{{- if and (or $bundle $secret) (or .Values.registry.plainHttp .Values.registry.insecure) -}}
+{{- fail "registry.ca requires registry.plainHttp=false and registry.insecure=false" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.registryRemoteCa" -}}
+{{- if and (eq (include "alquimia.registryMode" .) "remote") (or (include "alquimia.registryCaBundle" .) (include "alquimia.registryCaExistingSecret" .)) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.registryTrust" -}}
+{{- if or (eq (include "alquimia.registryTLS" .) "true") (eq (include "alquimia.registryRemoteCa" .) "true") -}}
+true
+{{- end -}}
+{{- end }}
+
 {{- define "alquimia.registryPlainHttp" -}}
 {{- if eq (include "alquimia.registryTLS" .) "true" -}}
 false
@@ -283,7 +325,7 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustInit" -}}
-{{- if eq (include "alquimia.registryTLS" .) "true" }}
+{{- if eq (include "alquimia.registryTrust" .) "true" }}
 - name: trust-registry-ca
   image: {{ .Values.images.runtime | quote }}
   imagePullPolicy: IfNotPresent
@@ -308,7 +350,7 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustEnv" -}}
-{{- if eq (include "alquimia.registryTLS" .) "true" }}
+{{- if eq (include "alquimia.registryTrust" .) "true" }}
 - name: SSL_CERT_FILE
   value: /trust/ca-bundle.crt
 - name: REQUESTS_CA_BUNDLE
@@ -319,7 +361,7 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustMount" -}}
-{{- if eq (include "alquimia.registryTLS" .) "true" }}
+{{- if eq (include "alquimia.registryTrust" .) "true" }}
 - name: trust-bundle
   mountPath: /trust
   readOnly: true
@@ -327,13 +369,27 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustVolumes" -}}
-{{- if eq (include "alquimia.registryTLS" .) "true" }}
+{{- if eq (include "alquimia.registryTrust" .) "true" }}
 - name: registry-ca
+  {{- if eq (include "alquimia.registryTLS" .) "true" }}
   secret:
     secretName: oras-registry-tls
     items:
       - key: ca.crt
         path: ca.crt
+  {{- else if include "alquimia.registryCaExistingSecret" . }}
+  secret:
+    secretName: {{ include "alquimia.registryCaExistingSecret" . | quote }}
+    items:
+      - key: {{ include "alquimia.registryCaSecretKey" . | quote }}
+        path: ca.crt
+  {{- else }}
+  configMap:
+    name: alquimia-registry-ca
+    items:
+      - key: ca.crt
+        path: ca.crt
+  {{- end }}
 - name: trust-bundle
   emptyDir: {}
 {{- end }}

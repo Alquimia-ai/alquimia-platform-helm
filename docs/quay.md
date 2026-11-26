@@ -40,7 +40,41 @@ studio:
 
 `registry.host` has no scheme and no path. `https://registry.acme.example` is not a valid host for the chart.
 
-With HTTPS, `plainHttp` and `insecure` stay `false`. The chart does not issue a CA for a remote registry: Quay presents its own certificate and the runtime verifies it.
+With HTTPS, `plainHttp` and `insecure` stay `false`. Quay presents its own certificate and the runtime verifies it against the trust store of the image. When that certificate is signed by an internal CA, set `registry.ca` (see below).
+
+## Private CA
+
+`registry.ca` mounts an extra CA on the runtime and the workers. An init container appends the PEM to `/etc/ssl/cert.pem` and the containers read the result through `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE`. The image CAs stay in the bundle, so a public `registry.public.host` still verifies. `plainHttp` and `insecure` stay `false`.
+
+Paste the PEM. The chart writes it to the ConfigMap `alquimia-registry-ca`, key `ca.crt`:
+
+```yaml
+registry:
+  mode: remote
+  host: registry.acme.example
+  plainHttp: false
+  insecure: false
+  ca:
+    bundle: |
+      -----BEGIN CERTIFICATE-----
+      ...
+      -----END CERTIFICATE-----
+```
+
+Or mount a Secret that already exists in the installation namespace. `existingSecretKey` defaults to `ca.crt`:
+
+```yaml
+registry:
+  mode: remote
+  host: registry.acme.example
+  plainHttp: false
+  insecure: false
+  ca:
+    existingSecret: quay-internal-ca
+    existingSecretKey: ca.crt
+```
+
+Set `bundle` or `existingSecret`, not both. `registry.ca` requires `registry.mode: remote`. The local registry keeps the CA it issues in `oras-registry-tls`.
 
 ## Robot account
 

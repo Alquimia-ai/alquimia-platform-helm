@@ -107,6 +107,14 @@ registry:
   tls: true
   plainHttp: false
   insecure: false
+  # Remote HTTPS signed by a private CA. The runtime and the workers append
+  # this PEM to the image trust store. Leave both empty to use the CAs already
+  # in the image. bundle and existingSecret cannot both be set. plainHttp and
+  # insecure stay false. Applies only when mode is remote.
+  ca:
+    bundle: ""
+    existingSecret: ""
+    existingSecretKey: ca.crt
   public:
     # Replace with the environment's host. Example: registry.acme.example
     host: registry.acme.example
