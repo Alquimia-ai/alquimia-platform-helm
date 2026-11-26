@@ -311,6 +311,87 @@ false
 {{- end }}
 {{- end }}
 
+{{- define "alquimia.keycloakCaBundle" -}}
+{{- $ca := .Values.keycloak.ca | default dict -}}
+{{- $ca.bundle | default "" | trim -}}
+{{- end }}
+
+{{- define "alquimia.keycloakCaExistingSecret" -}}
+{{- $ca := .Values.keycloak.ca | default dict -}}
+{{- $ca.existingSecret | default "" | trim -}}
+{{- end }}
+
+{{- define "alquimia.keycloakCaSecretKey" -}}
+{{- $ca := .Values.keycloak.ca | default dict -}}
+{{- $key := $ca.existingSecretKey | default "" | trim -}}
+{{- if $key }}{{ $key }}{{ else }}ca.crt{{ end -}}
+{{- end }}
+
+{{- define "alquimia.keycloakCa" -}}
+{{- if or (include "alquimia.keycloakCaBundle" .) (include "alquimia.keycloakCaExistingSecret" .) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.keycloakCaValidate" -}}
+{{- $bundle := include "alquimia.keycloakCaBundle" . -}}
+{{- $secret := include "alquimia.keycloakCaExistingSecret" . -}}
+{{- $url := "" -}}
+{{- if not .Values.keycloak.enabled -}}
+{{- $ex := .Values.keycloak.existing | default dict -}}
+{{- $url = $ex.url | default "" | trim -}}
+{{- end -}}
+{{- if and $bundle $secret -}}
+{{- fail "keycloak.ca.bundle and keycloak.ca.existingSecret cannot both be set" -}}
+{{- end -}}
+{{- if and (or $bundle $secret) .Values.keycloak.enabled -}}
+{{- fail "keycloak.ca requires keycloak.enabled false" -}}
+{{- end -}}
+{{- if and (or $bundle $secret) (not (hasPrefix "https://" $url)) -}}
+{{- fail "keycloak.ca requires keycloak.existing.url starting with https://" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.extraTrust" -}}
+{{- if or (eq (include "alquimia.registryTrust" .) "true") (eq (include "alquimia.minioCa" .) "true") (eq (include "alquimia.keycloakCa" .) "true") -}}
+true
+{{- end -}}
+{{- end }}
+
+{{- define "alquimia.keycloakCaVolume" -}}
+{{- if eq (include "alquimia.keycloakCa" .) "true" }}
+- name: keycloak-ca
+  {{- if include "alquimia.keycloakCaExistingSecret" . }}
+  secret:
+    secretName: {{ include "alquimia.keycloakCaExistingSecret" . | quote }}
+    items:
+      - key: {{ include "alquimia.keycloakCaSecretKey" . | quote }}
+        path: ca.crt
+  {{- else }}
+  configMap:
+    name: alquimia-keycloak-ca
+    items:
+      - key: ca.crt
+        path: ca.crt
+  {{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "alquimia.keycloakCaMount" -}}
+{{- if eq (include "alquimia.keycloakCa" .) "true" }}
+- name: keycloak-ca
+  mountPath: /etc/alquimia/keycloak-ca
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "alquimia.keycloakCaEnv" -}}
+{{- if eq (include "alquimia.keycloakCa" .) "true" }}
+- name: NODE_EXTRA_CA_CERTS
+  value: /etc/alquimia/keycloak-ca/ca.crt
+{{- end }}
+{{- end }}
+
 {{- define "alquimia.registryPlainHttp" -}}
 {{- if eq (include "alquimia.registryTLS" .) "true" -}}
 false
@@ -428,7 +509,7 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustInit" -}}
-{{- if or (eq (include "alquimia.registryTrust" .) "true") (eq (include "alquimia.minioCa" .) "true") }}
+{{- if eq (include "alquimia.extraTrust" .) "true" }}
 - name: trust-ca
   image: {{ .Values.images.runtime | quote }}
   imagePullPolicy: IfNotPresent
@@ -444,6 +525,9 @@ securityContext:
       if [ -f /etc/alquimia/minio-ca/ca.crt ]; then
         cat /etc/alquimia/minio-ca/ca.crt >> /trust/ca-bundle.crt
       fi
+      if [ -f /etc/alquimia/keycloak-ca/ca.crt ]; then
+        cat /etc/alquimia/keycloak-ca/ca.crt >> /trust/ca-bundle.crt
+      fi
   volumeMounts:
     {{- if eq (include "alquimia.registryTrust" .) "true" }}
     - name: registry-ca
@@ -453,6 +537,11 @@ securityContext:
     {{- if eq (include "alquimia.minioCa" .) "true" }}
     - name: minio-ca
       mountPath: /etc/alquimia/minio-ca
+      readOnly: true
+    {{- end }}
+    {{- if eq (include "alquimia.keycloakCa" .) "true" }}
+    - name: keycloak-ca
+      mountPath: /etc/alquimia/keycloak-ca
       readOnly: true
     {{- end }}
     - name: trust-bundle
@@ -468,7 +557,7 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustEnv" -}}
-{{- if or (eq (include "alquimia.registryTrust" .) "true") (eq (include "alquimia.minioCa" .) "true") }}
+{{- if eq (include "alquimia.extraTrust" .) "true" }}
 - name: SSL_CERT_FILE
   value: /trust/ca-bundle.crt
 - name: REQUESTS_CA_BUNDLE
@@ -483,7 +572,7 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustMount" -}}
-{{- if or (eq (include "alquimia.registryTrust" .) "true") (eq (include "alquimia.minioCa" .) "true") }}
+{{- if eq (include "alquimia.extraTrust" .) "true" }}
 - name: trust-bundle
   mountPath: /trust
   readOnly: true
@@ -491,7 +580,7 @@ securityContext:
 {{- end }}
 
 {{- define "alquimia.registryTrustVolumes" -}}
-{{- if or (eq (include "alquimia.registryTrust" .) "true") (eq (include "alquimia.minioCa" .) "true") }}
+{{- if eq (include "alquimia.extraTrust" .) "true" }}
 {{- if eq (include "alquimia.registryTrust" .) "true" }}
 - name: registry-ca
   {{- if eq (include "alquimia.registryTLS" .) "true" }}
@@ -529,6 +618,9 @@ securityContext:
       - key: ca.crt
         path: ca.crt
   {{- end }}
+{{- end }}
+{{- if eq (include "alquimia.keycloakCa" .) "true" }}
+{{- include "alquimia.keycloakCaVolume" . }}
 {{- end }}
 - name: trust-bundle
   emptyDir: {}

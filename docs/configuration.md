@@ -78,9 +78,7 @@ The default projects are `agents` and `brains`. Studio (`EXTERNAL_REGISTRY_*_PRO
 
 ## Keycloak
 
-The realm, the client id, and the secrets belong to the installation. The runtime client requires a service account with permission to read realm users. Studio redirects to `https://<studio.host>`.
-
-`KEYCLOAK_CALLBACK_URI` stays empty until the installation sets the callback URL in `keycloak.runtimeAuth.callbackUri`.
+`keycloak.enabled: true` deploys Keycloak in the installation namespace, on the chart's PostgreSQL. A Keycloak that already exists, the runtime and Studio clients, and a private CA are in [keycloak.md](keycloak.md).
 
 ## Zero Trust
 

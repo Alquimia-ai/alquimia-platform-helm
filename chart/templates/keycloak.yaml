@@ -1,3 +1,4 @@
+{{- include "alquimia.keycloakCaValidate" . -}}
 {{- $ex := .Values.keycloak.existing | default dict }}
 {{- $runtimeAuth := .Values.keycloak.runtimeAuth | default dict }}
 {{- $studioAuth := .Values.keycloak.studioAuth | default dict }}
@@ -363,4 +364,20 @@ spec:
 {{- else }}
 {{- fail "keycloak.exposure must be route or ingress" }}
 {{- end }}
+{{- end }}
+{{- if and (include "alquimia.keycloakCaBundle" .) (not (include "alquimia.keycloakCaExistingSecret" .)) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alquimia-keycloak-ca
+  namespace: {{ include "alquimia.namespace" . }}
+  labels:
+    app: keycloak
+    {{- include "alquimia.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+data:
+  ca.crt: |
+{{ printf "%s\n" (include "alquimia.keycloakCaBundle" .) | indent 4 }}
 {{- end }}

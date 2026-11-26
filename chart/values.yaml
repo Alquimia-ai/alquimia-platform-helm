@@ -337,6 +337,13 @@ keycloak:
     port: 8080
     # Existing Secret with the admin. Only recorded in keycloak-config.
     secretName: ""
+  # Private CA for a remote Keycloak (enabled: false, existing.url https://).
+  # The runtime appends it to the image trust store. Studio reads it through
+  # NODE_EXTRA_CA_CERTS. bundle and existingSecret cannot both be set.
+  ca:
+    bundle: ""
+    existingSecret: ""
+    existingSecretKey: ca.crt
   # Realm that issues user JWTs (OIDC).
   realm: alquimia
   # The alquimia-runtime-develop runtime rejects the generic account audience.

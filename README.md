@@ -12,6 +12,8 @@ Quay registry: [docs/quay.md](docs/quay.md).
 
 MinIO, including a remote endpoint and a private CA: [docs/minio.md](docs/minio.md).
 
+Keycloak, including a remote instance and a private CA: [docs/keycloak.md](docs/keycloak.md).
+
 ## Requirements
 
 - Cluster with `kubectl` or `oc`

@@ -142,6 +142,7 @@ spec:
           env:
             - name: NEDB_DATA_DIR
               value: /app/.data
+            {{- include "alquimia.keycloakCaEnv" . | nindent 12 }}
             {{- if ne (include "alquimia.runtimeKeycloak" .) "true" }}
             # The runtime with API_TOKEN rejects any other credential.
             # env overrides whatever comes from alquimia-studio-secrets.
@@ -168,10 +169,12 @@ spec:
             - name: studio-data
               mountPath: /app/.data
               subPath: studio
+            {{- include "alquimia.keycloakCaMount" . | nindent 12 }}
       volumes:
         - name: studio-data
           persistentVolumeClaim:
             claimName: alquimia-studio-data
+        {{- include "alquimia.keycloakCaVolume" . | nindent 8 }}
 ---
 apiVersion: v1
 kind: Service
