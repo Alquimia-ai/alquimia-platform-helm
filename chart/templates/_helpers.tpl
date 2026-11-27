@@ -30,7 +30,7 @@ affinity:
 {{- end }}
 
 {{- define "alquimia.isOpenShift" -}}
-{{- if .Capabilities.APIVersions.Has "config.openshift.io/v1" -}}true{{- end -}}
+{{- if .Values.openshift }}true{{- end -}}
 {{- end }}
 
 {{- define "alquimia.appsDomain" -}}

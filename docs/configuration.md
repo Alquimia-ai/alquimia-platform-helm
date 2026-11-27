@@ -80,6 +80,14 @@ The default projects are `agents` and `brains`. Studio (`EXTERNAL_REGISTRY_*_PRO
 
 `keycloak.enabled: true` deploys Keycloak in the installation namespace, on the chart's PostgreSQL. A Keycloak that already exists, the runtime and Studio clients, and a private CA are in [keycloak.md](keycloak.md).
 
+## OpenShift
+
+`openshift: false` sets `fsGroup: 1000` on the runtime, the workers, Kafka, and Qdrant, and `fsGroup: 999` on PostgreSQL. PostgreSQL also adds `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, and `SETGID` so the image can start as root, chown its data directory, and drop to `postgres`.
+
+`openshift: true` is the restricted-v2 profile. The chart does not set `fsGroup` or `runAsUser`. The master and the workers also omit `supplementalGroups: [1000]`. PostgreSQL drops every capability, sets `runAsNonRoot: true`, and stays on `images.postgres`. OpenShift assigns the UID and the fsGroup from the namespace range, and that image runs as that UID.
+
+A volume PostgreSQL already initialized as uid 999 with mode `0700` is not writable by the new UID. A new install is. An existing data directory needs its owner fixed once.
+
 ## Zero Trust
 
 `runtime.zeroTrust.enabled: true` turns on Keycloak in the runtime, the SPIFFE socket, and OCI signature verification. `spire.enabled: true` installs SPIRE in the `spire` namespace.

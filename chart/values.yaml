@@ -17,6 +17,14 @@ sealedSecrets: {}
 # Empty: taken from ingresses.config.openshift.io/cluster (spec.domain).
 appsDomain: ""
 
+# false: the chart sets fsGroup 1000 on the runtime, the workers, Kafka, and
+# Qdrant, fsGroup 999 on PostgreSQL, and the root capabilities PostgreSQL uses
+# to chown its data directory.
+# true: restricted-v2. The chart does not set fsGroup, runAsUser, or those
+# capabilities. OpenShift assigns the UID and the fsGroup from the namespace
+# range. PostgreSQL stays on images.postgres and runs as that UID.
+openshift: false
+
 # Optional. If empty, affinity is not set.
 # A component can override it with minio.nodeAffinity, kafka.nodeAffinity, and so on.
 nodeAffinity: {}

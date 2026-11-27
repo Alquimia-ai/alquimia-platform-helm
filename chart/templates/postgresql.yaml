@@ -60,7 +60,9 @@ spec:
       enableServiceLinks: false
       terminationGracePeriodSeconds: 60
       securityContext:
+        {{- if not (include "alquimia.isOpenShift" .) }}
         fsGroup: 999
+        {{- end }}
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
@@ -87,17 +89,23 @@ spec:
               mountPath: /var/lib/postgresql/data
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if (include "alquimia.isOpenShift" .) }}
+            runAsNonRoot: true
+            {{- end }}
             capabilities:
               drop:
                 - ALL
-              # The official image starts as root, chowns PGDATA, and
-              # drops to postgres with gosu. Without these caps the entrypoint dies.
+              {{- if not (include "alquimia.isOpenShift" .) }}
+              # The image starts as root, chowns PGDATA, and drops to postgres
+              # with gosu. openshift: true skips this path and runs as the UID
+              # OpenShift assigns.
               add:
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER
                 - SETUID
                 - SETGID
+              {{- end }}
           resources:
             limits:
               cpu: "2"

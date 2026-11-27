@@ -60,10 +60,10 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
-        supplementalGroups:
-          - 1000
         fsGroupChangePolicy: OnRootMismatch
         {{- if not (include "alquimia.isOpenShift" .) }}
+        supplementalGroups:
+          - 1000
         fsGroup: 1000
         {{- end }}
       initContainers:
